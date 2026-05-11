@@ -4,16 +4,26 @@ Single-panel inline editor. Supports both `/` and `.` command prefixes.
 Admins see the full feature set; standard users get a minimal command list.
 """
 
+from __future__ import annotations
+
 import asyncio
+import base64
 import csv
 import html
 import io
+import json
 import logging
 import os
 import re
+import resource
+import sys
 import textwrap
+import time
+import traceback
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from aiohttp import web
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -32,15 +42,40 @@ from weasyprint import HTML
 # Configuration
 # ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.INFO,
-)
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+STATE_PATH = DATA_DIR / "state.json"
+LOG_PATH = DATA_DIR / "bot.log"
+WATERMARK_IMG_PATH = DATA_DIR / "watermark_image.png"
+
+LOG_BUFFER: Deque[str] = deque(maxlen=2000)
+ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
+
+
+class BufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+            LOG_BUFFER.append(line)
+            if record.levelno >= logging.ERROR:
+                ERROR_BUFFER.append((time.time(), line))
+        except Exception:
+            pass
+
+
+_fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+_root = logging.getLogger()
+_root.setLevel(logging.INFO)
+for _h in (logging.StreamHandler(sys.stdout), logging.FileHandler(LOG_PATH, encoding="utf-8"), BufferHandler()):
+    _h.setFormatter(_fmt)
+    _root.addHandler(_h)
 logger = logging.getLogger("csvpdfbot")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID_RAW = os.getenv("OWNER_ID", "").strip()
 PORT = int(os.getenv("PORT", "10000"))
+START_TIME = time.time()
 
 try:
     OWNER_ID = int(OWNER_ID_RAW) if OWNER_ID_RAW else 0
@@ -57,6 +92,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "footer_link": "https://t.me/",
     "watermark_enabled": True,
     "watermark_text": "CONFIDENTIAL",
+    "watermark_opacity": 8,           # 0–100
+    "watermark_image_enabled": False,  # if True and image exists, image is used
     "logo_enabled": True,
     "answer_enabled": True,
     "explanation_enabled": True,
@@ -65,12 +102,28 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "theme": "green",
 }
 
-# Per-user state
-USER_SETTINGS: Dict[int, Dict[str, Any]] = {}
-USER_CSV: Dict[int, bytes] = {}
-USER_CSV_NAME: Dict[int, str] = {}
-WAITING_FOR: Dict[int, str] = {}
-PANEL_MSG: Dict[int, Tuple[int, int]] = {}  # user_id -> (chat_id, message_id)
+DEFAULT_BUTTON_LABELS: Dict[str, str] = {
+    "title": "Title",
+    "subtitle": "Subtitle",
+    "set_name": "Set",
+    "marks": "Marks",
+    "time": "Time",
+    "footer_text": "Footer Text",
+    "footer_link": "Footer Link",
+    "watermark_text": "Edit Text",
+    "watermark_image": "Watermark Image",
+    "watermark_opacity": "Opacity",
+    "logo_enabled": "Logo",
+    "watermark_enabled": "Watermark",
+    "watermark_image_enabled": "Image WM",
+    "answer_enabled": "Answer",
+    "explanation_enabled": "Explain",
+    "columns": "Columns",
+    "page_size": "Page",
+    "theme": "Theme",
+    "reset": "Reset",
+    "generate": "Generate PDF",
+}
 
 THEMES = {
     "green": {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
@@ -109,7 +162,59 @@ FIELD_LABELS = {
     "footer_text": "Footer Text",
     "footer_link": "Footer Link",
     "watermark_text": "Watermark Text",
+    "watermark_opacity": "Watermark Opacity (0–100)",
 }
+
+# ---------------------------------------------------------------------------
+# Persistent state
+# ---------------------------------------------------------------------------
+
+USER_SETTINGS: Dict[int, Dict[str, Any]] = {}
+USER_CSV: Dict[int, bytes] = {}
+USER_CSV_NAME: Dict[int, str] = {}
+WAITING_FOR: Dict[int, str] = {}
+PANEL_MSG: Dict[int, Tuple[int, int]] = {}
+BUTTON_LABELS: Dict[str, str] = dict(DEFAULT_BUTTON_LABELS)
+ACTIVITY: Dict[int, Dict[str, Any]] = {}  # user_id -> {name, last_action, last_seen}
+GENERATION_COUNT = 0
+
+
+def _save_state() -> None:
+    try:
+        payload = {
+            "user_settings": {str(k): v for k, v in USER_SETTINGS.items()},
+            "button_labels": BUTTON_LABELS,
+            "user_csv_name": {str(k): v for k, v in USER_CSV_NAME.items()},
+            "user_csv": {str(k): base64.b64encode(v).decode() for k, v in USER_CSV.items()},
+        }
+        STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to persist state")
+
+
+def _load_state() -> None:
+    if not STATE_PATH.exists():
+        return
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        for k, v in (payload.get("user_settings") or {}).items():
+            merged = DEFAULT_SETTINGS.copy()
+            merged.update(v or {})
+            USER_SETTINGS[int(k)] = merged
+        for k, v in (payload.get("button_labels") or {}).items():
+            if k in DEFAULT_BUTTON_LABELS:
+                BUTTON_LABELS[k] = v
+        for k, v in (payload.get("user_csv_name") or {}).items():
+            USER_CSV_NAME[int(k)] = v
+        for k, v in (payload.get("user_csv") or {}).items():
+            try:
+                USER_CSV[int(k)] = base64.b64decode(v)
+            except Exception:
+                pass
+        logger.info("State restored from %s", STATE_PATH)
+    except Exception:
+        logger.exception("Failed to load state")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -119,11 +224,30 @@ FIELD_LABELS = {
 def get_settings(user_id: int) -> Dict[str, Any]:
     if user_id not in USER_SETTINGS:
         USER_SETTINGS[user_id] = DEFAULT_SETTINGS.copy()
+    else:
+        # Ensure new keys exist after upgrade
+        for k, v in DEFAULT_SETTINGS.items():
+            USER_SETTINGS[user_id].setdefault(k, v)
     return USER_SETTINGS[user_id]
 
 
 def is_admin(user_id: Optional[int]) -> bool:
     return bool(user_id and OWNER_ID and user_id == OWNER_ID)
+
+
+def lbl(key: str) -> str:
+    return BUTTON_LABELS.get(key, DEFAULT_BUTTON_LABELS.get(key, key))
+
+
+def track(user, action: str) -> None:
+    if not user:
+        return
+    ACTIVITY[user.id] = {
+        "name": (user.full_name or user.username or str(user.id))[:48],
+        "username": user.username,
+        "last_action": action,
+        "last_seen": time.time(),
+    }
 
 
 def main_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
@@ -132,35 +256,40 @@ def main_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Title", callback_data="set:title"),
-            InlineKeyboardButton("Subtitle", callback_data="set:subtitle"),
+            InlineKeyboardButton(lbl("title"), callback_data="set:title"),
+            InlineKeyboardButton(lbl("subtitle"), callback_data="set:subtitle"),
         ],
         [
-            InlineKeyboardButton("Set", callback_data="set:set_name"),
-            InlineKeyboardButton("Marks", callback_data="set:marks"),
-            InlineKeyboardButton("Time", callback_data="set:time"),
+            InlineKeyboardButton(lbl("set_name"), callback_data="set:set_name"),
+            InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
+            InlineKeyboardButton(lbl("time"), callback_data="set:time"),
         ],
         [
-            InlineKeyboardButton("Footer Text", callback_data="set:footer_text"),
-            InlineKeyboardButton("Footer Link", callback_data="set:footer_link"),
+            InlineKeyboardButton(lbl("footer_text"), callback_data="set:footer_text"),
+            InlineKeyboardButton(lbl("footer_link"), callback_data="set:footer_link"),
         ],
         [
-            InlineKeyboardButton(f"Watermark · {flag('watermark_enabled')}", callback_data="toggle:watermark_enabled"),
-            InlineKeyboardButton("Edit Text", callback_data="set:watermark_text"),
+            InlineKeyboardButton(f"{lbl('watermark_enabled')} · {flag('watermark_enabled')}", callback_data="toggle:watermark_enabled"),
+            InlineKeyboardButton(lbl("watermark_text"), callback_data="set:watermark_text"),
         ],
         [
-            InlineKeyboardButton(f"Logo · {flag('logo_enabled')}", callback_data="toggle:logo_enabled"),
-            InlineKeyboardButton(f"Answer · {flag('answer_enabled')}", callback_data="toggle:answer_enabled"),
-            InlineKeyboardButton(f"Explain · {flag('explanation_enabled')}", callback_data="toggle:explanation_enabled"),
+            InlineKeyboardButton(f"{lbl('watermark_opacity')}: {settings.get('watermark_opacity', 8)}%", callback_data="set:watermark_opacity"),
+            InlineKeyboardButton(f"{lbl('watermark_image_enabled')} · {flag('watermark_image_enabled')}", callback_data="toggle:watermark_image_enabled"),
+            InlineKeyboardButton(lbl("watermark_image"), callback_data="upload:watermark_image"),
         ],
         [
-            InlineKeyboardButton(f"Columns: {settings['columns']}", callback_data="cycle:columns"),
-            InlineKeyboardButton(f"Page: {settings['page_size']}", callback_data="cycle:page_size"),
-            InlineKeyboardButton(f"Theme: {settings['theme'].title()}", callback_data="cycle:theme"),
+            InlineKeyboardButton(f"{lbl('logo_enabled')} · {flag('logo_enabled')}", callback_data="toggle:logo_enabled"),
+            InlineKeyboardButton(f"{lbl('answer_enabled')} · {flag('answer_enabled')}", callback_data="toggle:answer_enabled"),
+            InlineKeyboardButton(f"{lbl('explanation_enabled')} · {flag('explanation_enabled')}", callback_data="toggle:explanation_enabled"),
         ],
         [
-            InlineKeyboardButton("Reset", callback_data="reset"),
-            InlineKeyboardButton("Generate PDF", callback_data="generate"),
+            InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+            InlineKeyboardButton(f"{lbl('page_size')}: {settings['page_size']}", callback_data="cycle:page_size"),
+            InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
+        ],
+        [
+            InlineKeyboardButton(lbl("reset"), callback_data="reset"),
+            InlineKeyboardButton(lbl("generate"), callback_data="generate"),
         ],
     ])
 
@@ -169,10 +298,22 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel")]])
 
 
+def buttons_editor_keyboard() -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    keys = list(DEFAULT_BUTTON_LABELS.keys())
+    for i in range(0, len(keys), 2):
+        chunk = keys[i:i + 2]
+        rows.append([InlineKeyboardButton(f"{lbl(k)}", callback_data=f"btnedit:{k}") for k in chunk])
+    rows.append([InlineKeyboardButton("Reset Labels", callback_data="btnreset"),
+                 InlineKeyboardButton("Close", callback_data="btnclose")])
+    return InlineKeyboardMarkup(rows)
+
+
 def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None) -> str:
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = "Administrator" if is_admin(user_id) else "Standard User"
+    wm_mode = "Image" if settings.get("watermark_image_enabled") and WATERMARK_IMG_PATH.exists() else "Text"
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
@@ -188,7 +329,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
 
     <b>Layout</b>
       • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
-      • Watermark: <code>{html.escape(str(settings['watermark_text']))}</code>
+      • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
 
     <b>Source</b>
       • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
@@ -208,6 +349,9 @@ def admin_help() -> str:
     <code>/reset</code> — Restore default settings
     <code>/status</code> — Show current configuration
     <code>/clear</code> — Remove the loaded CSV file
+    <code>/buttons</code> — Customise button labels &amp; emojis
+    <code>/logs</code> — Live activity, memory &amp; recent errors
+    <code>/restart</code> — Restart the bot (state is preserved)
     <code>/help</code> — Show this message
 
     <i>All commands also work with the </i><code>.</code><i> prefix (e.g. </i><code>.start</code><i>).</i>
@@ -243,12 +387,16 @@ async def send_or_update_panel(
     user_id = user.id
     settings = get_settings(user_id)
 
-    if waiting_field:
+    if waiting_field == "watermark_image":
+        text = panel_text(user_id, settings, note) + "\n\n<b>Awaiting upload</b>\nSend a PNG / JPG image to use as watermark."
+        markup = cancel_keyboard()
+    elif waiting_field and waiting_field.startswith("btnlabel:"):
+        key = waiting_field.split(":", 1)[1]
+        text = panel_text(user_id, settings, note) + f"\n\n<b>Awaiting input</b>\nReply with the new label (emoji allowed) for <b>{html.escape(key)}</b>."
+        markup = cancel_keyboard()
+    elif waiting_field:
         label = FIELD_LABELS.get(waiting_field, waiting_field)
-        text = (
-            panel_text(user_id, settings, note)
-            + f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
-        )
+        text = panel_text(user_id, settings, note) + f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
         markup = cancel_keyboard()
     else:
         text = panel_text(user_id, settings, note)
@@ -260,12 +408,9 @@ async def send_or_update_panel(
     if panel and panel[0] == chat_id:
         try:
             await context.bot.edit_message_text(
-                chat_id=panel[0],
-                message_id=panel[1],
-                text=text,
-                reply_markup=markup,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
+                chat_id=panel[0], message_id=panel[1],
+                text=text, reply_markup=markup,
+                parse_mode=ParseMode.HTML, disable_web_page_preview=True,
             )
             return
         except BadRequest as exc:
@@ -274,13 +419,102 @@ async def send_or_update_panel(
             logger.info("Panel edit failed, sending new: %s", exc)
 
     sent = await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        reply_markup=markup,
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
+        chat_id=chat_id, text=text, reply_markup=markup,
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True,
     )
     PANEL_MSG[user_id] = (sent.chat_id, sent.message_id)
+
+
+# ---------------------------------------------------------------------------
+# Owner-only utilities
+# ---------------------------------------------------------------------------
+
+
+def _format_uptime(seconds: float) -> str:
+    s = int(seconds)
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
+
+
+def _memory_mb() -> float:
+    try:
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux: KB; macOS: bytes
+        if sys.platform == "darwin":
+            return usage / (1024 * 1024)
+        return usage / 1024
+    except Exception:
+        return 0.0
+
+
+def build_logs_text() -> str:
+    now = time.time()
+    active_window = 600  # 10 minutes
+    active = [a for a in ACTIVITY.values() if now - a["last_seen"] < active_window]
+    recent_errors = [(t, m) for (t, m) in ERROR_BUFFER if now - t < 3600]
+
+    lines: List[str] = []
+    lines.append("<b>Bot Status</b>")
+    lines.append(f"  • Uptime: <code>{_format_uptime(now - START_TIME)}</code>")
+    lines.append(f"  • Memory: <code>{_memory_mb():.1f} MB</code>")
+    lines.append(f"  • PID: <code>{os.getpid()}</code>")
+    lines.append(f"  • Generated PDFs: <code>{GENERATION_COUNT}</code>")
+    lines.append(f"  • Persisted users: <code>{len(USER_SETTINGS)}</code>")
+    lines.append("")
+    lines.append(f"<b>Active Users (last 10 min): {len(active)}</b>")
+    if active:
+        for a in sorted(active, key=lambda x: -x["last_seen"])[:15]:
+            ago = int(now - a["last_seen"])
+            lines.append(f"  • {html.escape(a['name'])} — <i>{html.escape(a['last_action'])}</i> ({ago}s ago)")
+    else:
+        lines.append("  • <i>None</i>")
+    lines.append("")
+    lines.append(f"<b>Errors (last hour): {len(recent_errors)}</b>")
+    if recent_errors:
+        for t, m in recent_errors[-6:]:
+            stamp = datetime.fromtimestamp(t, tz=timezone.utc).strftime("%H:%M:%S")
+            snippet = html.escape(m[-220:])
+            lines.append(f"  <code>[{stamp}]</code> {snippet}")
+    else:
+        lines.append("  • <i>No errors in the last hour</i>")
+    return "\n".join(lines)
+
+
+async def cmd_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    text = build_logs_text()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Refresh", callback_data="logs:refresh"),
+         InlineKeyboardButton("Download Log File", callback_data="logs:download")],
+    ])
+    await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb, disable_web_page_preview=True)
+
+
+async def cmd_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    _save_state()
+    await msg.reply_text("⟳ Restart initiated. State preserved.", parse_mode=ParseMode.HTML)
+    # Persist a marker so we can announce successful restart
+    try:
+        (DATA_DIR / "restart_target.json").write_text(
+            json.dumps({"chat_id": msg.chat_id}), encoding="utf-8"
+        )
+    except Exception:
+        pass
+    logger.warning("Restart requested by owner")
+    await asyncio.sleep(0.5)
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 # ---------------------------------------------------------------------------
@@ -304,15 +538,13 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return True
 
     admin = is_admin(user.id)
+    track(user, f"/{cmd}")
 
     if cmd == "start":
         await cmd_start(update, context)
     elif cmd == "help":
-        await msg.reply_text(
-            admin_help() if admin else user_help(),
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
+        await msg.reply_text(admin_help() if admin else user_help(),
+                             parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     elif cmd in {"panel", "menu"} and admin:
         PANEL_MSG.pop(user.id, None)
         await send_or_update_panel(update, context)
@@ -320,17 +552,24 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await generate_for_user(update, context)
     elif cmd == "reset" and admin:
         USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
+        _save_state()
         await send_or_update_panel(update, context, note="Settings restored to defaults.")
     elif cmd == "status" and admin:
         await send_or_update_panel(update, context)
     elif cmd == "clear" and admin:
         USER_CSV.pop(user.id, None)
         USER_CSV_NAME.pop(user.id, None)
+        _save_state()
         await send_or_update_panel(update, context, note="CSV cleared.")
+    elif cmd == "buttons" and admin:
+        await msg.reply_text("<b>Button Editor</b>\nSelect a button to rename (emoji supported).",
+                             parse_mode=ParseMode.HTML, reply_markup=buttons_editor_keyboard())
+    elif cmd == "logs" and admin:
+        await cmd_logs(update, context)
+    elif cmd == "restart" and admin:
+        await cmd_restart(update, context)
     else:
-        await msg.reply_text(
-            "Unknown command." if admin else "This command is not available for your account.",
-        )
+        await msg.reply_text("Unknown command." if admin else "This command is not available for your account.")
     return True
 
 
@@ -363,7 +602,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not msg or not user:
         return
 
-    # Command routing first (covers / and .)
     if msg.text and msg.text[:1] in "/.":
         if await dispatch_command(update, context):
             return
@@ -375,20 +613,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not field:
         return
 
-    settings = get_settings(user.id)
     value = (msg.text or "").strip()
-    settings[field] = value
+    note = ""
 
-    # Delete the user's reply to keep the chat tidy around the single panel.
+    if field.startswith("btnlabel:"):
+        key = field.split(":", 1)[1]
+        if key in DEFAULT_BUTTON_LABELS:
+            BUTTON_LABELS[key] = value or DEFAULT_BUTTON_LABELS[key]
+            note = f"Button '{key}' renamed."
+    else:
+        settings = get_settings(user.id)
+        if field == "watermark_opacity":
+            try:
+                n = max(0, min(100, int(re.sub(r"\D", "", value) or "0")))
+                settings[field] = n
+                note = f"Watermark opacity set to {n}%."
+            except Exception:
+                note = "Invalid number."
+        else:
+            settings[field] = value
+            note = f"{FIELD_LABELS.get(field, field)} updated."
+
+    _save_state()
+
     try:
         await msg.delete()
     except Exception:
         pass
 
-    await send_or_update_panel(
-        update, context,
-        note=f"{FIELD_LABELS.get(field, field)} updated.",
-    )
+    track(user, f"set {field}")
+    await send_or_update_panel(update, context, note=note)
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -401,43 +655,85 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer("Restricted.", show_alert=True)
         return
 
+    track(user, f"btn:{query.data}")
     settings = get_settings(user.id)
     data = query.data or ""
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
-    if data.startswith("set:"):
+    if data == "logs:refresh":
+        try:
+            await query.edit_message_text(
+                build_logs_text(), parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Refresh", callback_data="logs:refresh"),
+                    InlineKeyboardButton("Download Log File", callback_data="logs:download"),
+                ]]), disable_web_page_preview=True,
+            )
+        except BadRequest:
+            pass
+        return
+
+    if data == "logs:download":
+        if LOG_PATH.exists():
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=LOG_PATH.open("rb"),
+                filename="bot.log",
+                caption="Full log file.",
+            )
+        else:
+            await query.answer("No log file yet.", show_alert=True)
+        return
+
+    if data.startswith("btnedit:"):
+        key = data.split(":", 1)[1]
+        WAITING_FOR[user.id] = f"btnlabel:{key}"
+        waiting_field = f"btnlabel:{key}"
+    elif data == "btnreset":
+        BUTTON_LABELS.clear()
+        BUTTON_LABELS.update(DEFAULT_BUTTON_LABELS)
+        _save_state()
+        try:
+            await query.edit_message_reply_markup(reply_markup=buttons_editor_keyboard())
+        except BadRequest:
+            pass
+        return
+    elif data == "btnclose":
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        return
+    elif data.startswith("set:"):
         field = data.split(":", 1)[1]
         WAITING_FOR[user.id] = field
         waiting_field = field
-
+    elif data == "upload:watermark_image":
+        WAITING_FOR[user.id] = "watermark_image"
+        waiting_field = "watermark_image"
     elif data.startswith("toggle:"):
         field = data.split(":", 1)[1]
-        settings[field] = not bool(settings[field])
+        settings[field] = not bool(settings.get(field))
         note = f"{field.replace('_', ' ').title()} toggled."
-
     elif data == "cycle:columns":
         settings["columns"] = 1 if int(settings.get("columns", 2)) == 2 else 2
-
     elif data == "cycle:page_size":
         settings["page_size"] = "Letter" if settings.get("page_size") == "A4" else "A4"
-
     elif data == "cycle:theme":
         keys = list(THEMES.keys())
         settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
-
     elif data == "reset":
         USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
         note = "Settings restored to defaults."
-
     elif data == "cancel":
         WAITING_FOR.pop(user.id, None)
         note = "Cancelled."
-
     elif data == "generate":
         await generate_for_user(update, context)
         return
 
+    _save_state()
     await send_or_update_panel(update, context, note=note, waiting_field=waiting_field)
 
 
@@ -449,6 +745,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not is_admin(user.id):
         await msg.reply_text("Restricted.")
         return
+    track(user, "upload document")
 
     doc = msg.document
     if not doc:
@@ -456,6 +753,24 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     file_name = (doc.file_name or "").lower()
     mime = (doc.mime_type or "").lower()
+    is_image = mime.startswith("image/") or file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
+
+    # Image upload for watermark
+    if WAITING_FOR.get(user.id) == "watermark_image" or is_image:
+        if not is_image:
+            await msg.reply_text("Please send a PNG or JPG image.")
+            return
+        WAITING_FOR.pop(user.id, None)
+        tg_file = await context.bot.get_file(doc.file_id)
+        await tg_file.download_to_drive(custom_path=str(WATERMARK_IMG_PATH))
+        s = get_settings(user.id)
+        s["watermark_image_enabled"] = True
+        _save_state()
+        try: await msg.delete()
+        except Exception: pass
+        await send_or_update_panel(update, context, note="Watermark image saved and enabled.")
+        return
+
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
         await msg.reply_text("Only .csv files are accepted.")
         return
@@ -465,13 +780,33 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = bytes(await tg_file.download_as_bytearray())
     USER_CSV[user.id] = data
     USER_CSV_NAME[user.id] = doc.file_name or "uploaded.csv"
+    _save_state()
 
-    try:
-        await msg.delete()
-    except Exception:
-        pass
+    try: await msg.delete()
+    except Exception: pass
 
     await send_or_update_panel(update, context, note="CSV received and ready.")
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user or not is_admin(user.id):
+        return
+    if WAITING_FOR.get(user.id) != "watermark_image":
+        return
+    photo = msg.photo[-1] if msg.photo else None
+    if not photo:
+        return
+    WAITING_FOR.pop(user.id, None)
+    tg_file = await context.bot.get_file(photo.file_id)
+    await tg_file.download_to_drive(custom_path=str(WATERMARK_IMG_PATH))
+    s = get_settings(user.id)
+    s["watermark_image_enabled"] = True
+    _save_state()
+    try: await msg.delete()
+    except Exception: pass
+    await send_or_update_panel(update, context, note="Watermark image saved and enabled.")
 
 
 # ---------------------------------------------------------------------------
@@ -530,50 +865,40 @@ def render_inline_math(text: str) -> str:
 
 def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> str:
     question = row.get("question") or row.get("প্রশ্ন") or next(iter(row.values()), "")
-    marks = row.get("marks") or ("" if settings.get("marks") == "auto" else str(settings.get("marks", "")))
     options = [row.get("option_a", ""), row.get("option_b", ""), row.get("option_c", ""), row.get("option_d", "")]
     labels = ["A", "B", "C", "D"]
 
-    opt_cells = "".join(
-        f"<td class='option'><span class='opt-label'>{labels[i]}.</span>"
-        f"<span class='opt-text'>{render_inline_math(opt)}</span></td>"
-        for i, opt in enumerate(options) if opt
-    )
-    # Two options per row for tidy alignment.
     opt_rows = ""
-    pairs = [opt for opt in options if opt]
-    if pairs:
-        rows_table = ""
-        for i in range(0, len([o for o in options if o]), 2):
+    if any(options):
+        rows_html = ""
+        present = [(labels[i], opt) for i, opt in enumerate(options) if opt]
+        for i in range(0, len(present), 2):
             cells = ""
             for j in range(2):
-                idx = i + j
-                if idx < len(options) and options[idx]:
+                if i + j < len(present):
+                    lab, opt = present[i + j]
                     cells += (
-                        f"<td class='option'><span class='opt-label'>{labels[idx]}.</span>"
-                        f"<span class='opt-text'>{render_inline_math(options[idx])}</span></td>"
+                        f"<td class='option'><span class='opt-label'>{lab}.</span>"
+                        f"<span class='opt-text'>{render_inline_math(opt)}</span></td>"
                     )
                 else:
                     cells += "<td class='option'></td>"
-            rows_table += f"<tr>{cells}</tr>"
-        opt_rows = f"<table class='options'>{rows_table}</table>"
+            rows_html += f"<tr>{cells}</tr>"
+        opt_rows = f"<table class='options'>{rows_html}</table>"
 
     answer = row.get("answer", "")
     explanation = row.get("explanation", "")
-
     extras = ""
     if settings.get("answer_enabled") and answer:
         extras += f"<div class='answer'><b>Answer:</b> {render_inline_math(answer)}</div>"
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
-    mark_html = f"<span class='marks'>{html.escape(marks)}</span>" if marks else ""
     return f"""
     <article class='question'>
       <table class='q-head'><tr>
-        <td class='q-no'>{index}</td>
+        <td class='q-no'><span class='q-circle'>{index}</span></td>
         <td class='q-text'>{render_inline_math(question)}</td>
-        <td class='q-marks'>{mark_html}</td>
       </tr></table>
       {opt_rows}
       {extras}
@@ -585,12 +910,23 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     theme = THEMES.get(settings.get("theme"), THEMES["green"])
     columns = 2 if int(settings.get("columns", 2)) == 2 else 1
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
-    watermark = html.escape(settings.get("watermark_text", "")) if settings.get("watermark_enabled") else ""
-    logo = "<td class='logo'>PDF</td>" if settings.get("logo_enabled") else ""
+    opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
+    use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and WATERMARK_IMG_PATH.exists()
+    use_text_wm = bool(settings.get("watermark_enabled")) and not use_image_wm
+    watermark_text = html.escape(settings.get("watermark_text", "")) if use_text_wm else ""
     questions = "\n".join(question_html(row, i + 1, settings) for i, row in enumerate(rows))
 
     footer_text = html.escape(settings.get("footer_text", ""))
     footer_link = html.escape(settings.get("footer_link", ""))
+
+    wm_html = ""
+    if use_image_wm:
+        wm_html = (
+            f"<div class='watermark-img' style='opacity:{opacity};'>"
+            f"<img src='{WATERMARK_IMG_PATH.name}' alt=''/></div>"
+        )
+    elif use_text_wm and watermark_text:
+        wm_html = f"<div class='watermark' style='opacity:{opacity};'>{watermark_text}</div>"
 
     return f"""<!doctype html>
 <html lang='en'>
@@ -616,18 +952,15 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   .question {{ break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; margin-bottom: 9px; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
-  td.q-no {{ width: 24px; vertical-align: top; }}
-  td.q-no::before {{ content: attr(data-n); }}
-  td.q-no {{ background: {theme['primary']}; color: #fff; border-radius: 999px; text-align: center; font-weight: 800; font-size: 9pt; height: 22px; line-height: 22px; width: 22px; }}
+  td.q-no {{ width: 26px; vertical-align: top; padding: 0; }}
+  .q-circle {{ display: inline-block; width: 20px; height: 20px; line-height: 20px; border-radius: 50%; background: {theme['primary']}; color: #fff; text-align: center; font-weight: 700; font-size: 9pt; font-family: 'DejaVu Sans', sans-serif; }}
   td.q-text {{ padding-left: 8px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
-  td.q-marks {{ width: 1%; text-align: right; vertical-align: top; padding-left: 6px; }}
-  .marks {{ border: 1px solid {theme['accent']}; color: {theme['primary']}; padding: 1px 6px; border-radius: 999px; font-size: 8pt; white-space: nowrap; }}
 
-  table.options {{ table-layout: fixed; margin: 4px 0 0 30px; width: calc(100% - 30px); }}
+  table.options {{ table-layout: fixed; margin: 4px 0 0 28px; width: calc(100% - 28px); }}
   table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
-  .answer, .explanation {{ margin: 5px 0 0 30px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
+  .answer, .explanation {{ margin: 5px 0 0 28px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
 
   .frac {{ display: inline-block; vertical-align: middle; text-align: center; line-height: 1; font-size: 0.9em; }}
   .frac span {{ display: block; }}
@@ -635,13 +968,15 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   .frac span:last-child {{ padding-top: 1px; }}
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
-  .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: rgba(15, 23, 42, .06); font-weight: 900; z-index: -1; letter-spacing: 4px; }}
+  .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
+  .watermark-img {{ position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: -1; }}
+  .watermark-img img {{ width: 140mm; max-width: 80%; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 </style>
 </head>
 <body>
-  {('<div class="watermark">' + watermark + '</div>') if watermark else ''}
+  {wm_html}
   <div class='footer'>{footer_text}{(' — <a href="' + footer_link + '">' + footer_link + '</a>') if footer_link else ''}</div>
 
   <table class='header'><tr>
@@ -650,7 +985,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
       <h1>{html.escape(settings.get('title', ''))}</h1>
       <div class='subtitle'>{html.escape(settings.get('subtitle', ''))}</div>
     </td>
-    <td class='meta'>Set: {html.escape(str(settings.get('set_name', '')))}<br>Time: {html.escape(str(settings.get('time', '')))}</td>
+    <td class='meta'>Set: {html.escape(str(settings.get('set_name', '')))}<br>Marks: {html.escape(str(settings.get('marks', '')))}<br>Time: {html.escape(str(settings.get('time', '')))}</td>
   </tr></table>
 
   <main class='paper'>{questions}</main>
@@ -661,11 +996,19 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any]) -> bytes:
     rows = parse_csv(csv_data)
     html_string = build_html(rows, settings)
-    base_url = str(Path(__file__).resolve().parent)
+    # Use DATA_DIR as base so watermark image resolves; fonts referenced via BASE_DIR fallback
+    # WeasyPrint resolves both — copy font path absolute via base_url to BASE_DIR if no image.
+    base_url = str(DATA_DIR) if WATERMARK_IMG_PATH.exists() else str(BASE_DIR)
+    # Inject fonts absolute path
+    html_string = html_string.replace(
+        "url('fonts/NotoSansBengali-Regular.ttf')",
+        f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
+    )
     return HTML(string=html_string, base_url=base_url).write_pdf()
 
 
 async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global GENERATION_COUNT
     user = update.effective_user
     msg = update.effective_message
     if not user or not msg:
@@ -676,23 +1019,61 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     settings = get_settings(user.id).copy()
-    await send_or_update_panel(update, context, note="Generating PDF…")
-    await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+    track(user, "generating PDF")
+    chat_id = msg.chat.id
+
+    # Inline processing message (separate from main panel)
+    progress = await context.bot.send_message(chat_id=chat_id, text="⟳ Processing… preparing your document.")
+    stop_flag = {"v": False}
+
+    async def animate():
+        dots = ["⟳ Processing", "⟳ Processing.", "⟳ Processing..", "⟳ Processing..."]
+        i = 0
+        while not stop_flag["v"]:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id, message_id=progress.message_id,
+                    text=f"{dots[i % 4]}\n<i>Rendering PDF, please wait…</i>",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(1.2)
+            i += 1
+
+    anim_task = asyncio.create_task(animate())
 
     try:
+        await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
         pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings)
+        stop_flag["v"] = True
+        anim_task.cancel()
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
+        except Exception:
+            pass
+
         bio = io.BytesIO(pdf_bytes)
         bio.name = "document.pdf"
         await context.bot.send_document(
-            chat_id=msg.chat.id,
-            document=bio,
-            filename="document.pdf",
+            chat_id=chat_id, document=bio, filename="document.pdf",
             caption="Document generated successfully.",
         )
+        GENERATION_COUNT += 1
         await send_or_update_panel(update, context, note="PDF delivered.")
     except Exception as exc:
+        stop_flag["v"] = True
+        anim_task.cancel()
         logger.exception("PDF generation failed")
-        await send_or_update_panel(update, context, note=f"Generation failed: {exc}")
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=progress.message_id,
+                text=f"⚠ Generation failed: {html.escape(str(exc))}",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+        await send_or_update_panel(update, context, note="Generation failed.")
 
 
 # ---------------------------------------------------------------------------
@@ -716,9 +1097,22 @@ async def start_health_server() -> web.AppRunner:
     return runner
 
 
-async def post_init(_: Application) -> None:
+async def post_init(app: Application) -> None:
     await start_health_server()
     logger.info("Bot started successfully")
+    # Notify owner if a restart marker exists
+    marker = DATA_DIR / "restart_target.json"
+    if marker.exists():
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            chat_id = data.get("chat_id")
+            if chat_id:
+                await app.bot.send_message(chat_id=chat_id, text="✓ Bot restarted successfully. State preserved.")
+        except Exception:
+            logger.exception("Restart notification failed")
+        finally:
+            try: marker.unlink()
+            except Exception: pass
 
 
 def main() -> None:
@@ -727,14 +1121,20 @@ def main() -> None:
     if not OWNER_ID:
         raise RuntimeError("OWNER_ID environment variable is missing or invalid")
 
+    _load_state()
+
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    # Single text handler routes both / and . commands plus settings input.
     app.add_handler(MessageHandler(filters.TEXT, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        logger.error("Fatal:\n%s", traceback.format_exc())
+        raise
