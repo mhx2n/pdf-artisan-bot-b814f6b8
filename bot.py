@@ -1257,9 +1257,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     wm_html = ""
     if use_image_wm:
         wm_html = (
-            f"<table class='watermark-img'><tr><td>"
+            f"<div class='watermark-img'>"
             f"<img src='{WATERMARK_IMG_PATH.name}' alt='' style='opacity:{opacity};'/>"
-            f"</td></tr></table>"
+            f"</div>"
         )
     elif use_text_wm and watermark_text:
         wm_html = f"<div class='watermark' style='opacity:{opacity};'>{watermark_text}</div>"
@@ -1284,7 +1284,17 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 <title>{html.escape(settings.get('title', 'PDF'))}</title>
 <style>
   @font-face {{ font-family: 'Noto Sans Bengali'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
-  @page {{ size: {size}; margin: 14mm 12mm 16mm; @bottom-center {{ content: element(footer); }} }}
+  @page {{
+      size: {size};
+      margin: 14mm 12mm 18mm;
+      @bottom-center {{ content: element(footer); }}
+      @bottom-right {{
+          content: "Page " counter(page) " of " counter(pages);
+          font-family: 'DejaVu Sans', sans-serif;
+          font-size: 8.5pt; color: #6b7280;
+          padding-bottom: 4mm;
+      }}
+  }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: 'Noto Sans Bengali', 'DejaVu Sans', 'Helvetica', sans-serif; color: #111827; line-height: 1.5; font-size: 10.5pt; margin: 0; }}
   table {{ border-collapse: collapse; width: 100%; }}
@@ -1337,9 +1347,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
   .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
-  table.watermark-img {{ position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; border-collapse: collapse; }}
-  table.watermark-img td {{ text-align: center; vertical-align: middle; padding: 0; }}
-  table.watermark-img img {{ width: 110mm; max-width: 70%; height: auto; }}
+  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; }}
+  .watermark-img img {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; margin: auto; width: 110mm; height: auto; max-width: 70%; max-height: 60%; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 </style>
