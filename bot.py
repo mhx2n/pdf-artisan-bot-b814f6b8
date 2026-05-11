@@ -426,12 +426,13 @@ def help_text(user_id: int) -> str:
         <code>/clear</code> — Remove the loaded CSV
 
         <b>Access management</b>
+        <code>/users</code> — List all administrators &amp; generators
         <code>/admins</code> — List administrators
-        <code>/addadmin &lt;id&gt;</code> — Promote a user to administrator
-        <code>/removeadmin &lt;id&gt;</code> — Revoke administrator access
+        <code>/addadmin &lt;id&gt;</code> (alias <code>/promote</code>) — Promote a user to administrator
+        <code>/removeadmin &lt;id&gt;</code> (alias <code>/demote</code>) — Revoke administrator access
         <code>/gens</code> — List generator users
-        <code>/addgen &lt;id&gt;</code> — Grant generate-only access
-        <code>/removegen &lt;id&gt;</code> — Revoke generate-only access
+        <code>/addgen &lt;id&gt;</code> (alias <code>/allow</code>) — Grant generate-only access
+        <code>/removegen &lt;id&gt;</code> (alias <code>/deny</code>) — Revoke generate-only access
 
         <b>Customisation &amp; ops</b>
         <code>/buttons</code> — Customise button labels
