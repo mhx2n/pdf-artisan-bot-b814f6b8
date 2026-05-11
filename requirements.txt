@@ -1,0 +1,9 @@
+python-telegram-bot==21.10
+httpx==0.27.2
+aiohttp==3.10.10
+weasyprint==62.3
+Pillow==10.4.0
+fonttools==4.54.1
+pydyf==0.10.0
+cffi==1.17.1
+Brotli==1.1.0
