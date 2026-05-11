@@ -1482,9 +1482,20 @@ def main() -> None:
     # never block each other. PTB v21 default is sequential per-update,
     # which is fine because each handler awaits I/O — but PDF rendering is
     # CPU-bound and runs in a thread, releasing the event loop.
+    # Generous HTTP timeouts so large PDF re-uploads (rename) don't time out.
+    from telegram.request import HTTPXRequest
+    req = HTTPXRequest(
+        connection_pool_size=16,
+        connect_timeout=30.0,
+        read_timeout=180.0,
+        write_timeout=180.0,
+        pool_timeout=60.0,
+    )
     app = (
         Application.builder()
         .token(BOT_TOKEN)
+        .request(req)
+        .get_updates_request(HTTPXRequest(connect_timeout=30.0, read_timeout=60.0))
         .post_init(post_init)
         .concurrent_updates(True)
         .build()
