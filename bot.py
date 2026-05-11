@@ -1347,9 +1347,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
   .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
-  table.watermark-img {{ position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; border-collapse: collapse; }}
-  table.watermark-img td {{ text-align: center; vertical-align: middle; padding: 0; }}
-  table.watermark-img img {{ width: 110mm; max-width: 70%; height: auto; }}
+  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; }}
+  .watermark-img img {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; margin: auto; width: 110mm; height: auto; max-width: 70%; max-height: 60%; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 </style>
