@@ -1235,8 +1235,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     wm_html = ""
     if use_image_wm:
         wm_html = (
-            f"<div class='watermark-img' style='opacity:{opacity};'>"
-            f"<img src='{WATERMARK_IMG_PATH.name}' alt=''/></div>"
+            f"<table class='watermark-img'><tr><td>"
+            f"<img src='{WATERMARK_IMG_PATH.name}' alt='' style='opacity:{opacity};'/>"
+            f"</td></tr></table>"
         )
     elif use_text_wm and watermark_text:
         wm_html = f"<div class='watermark' style='opacity:{opacity};'>{watermark_text}</div>"
