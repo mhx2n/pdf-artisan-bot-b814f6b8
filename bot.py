@@ -426,12 +426,13 @@ def help_text(user_id: int) -> str:
         <code>/clear</code> — Remove the loaded CSV
 
         <b>Access management</b>
+        <code>/users</code> — List all administrators &amp; generators
         <code>/admins</code> — List administrators
-        <code>/addadmin &lt;id&gt;</code> — Promote a user to administrator
-        <code>/removeadmin &lt;id&gt;</code> — Revoke administrator access
+        <code>/addadmin &lt;id&gt;</code> (alias <code>/promote</code>) — Promote a user to administrator
+        <code>/removeadmin &lt;id&gt;</code> (alias <code>/demote</code>) — Revoke administrator access
         <code>/gens</code> — List generator users
-        <code>/addgen &lt;id&gt;</code> — Grant generate-only access
-        <code>/removegen &lt;id&gt;</code> — Revoke generate-only access
+        <code>/addgen &lt;id&gt;</code> (alias <code>/allow</code>) — Grant generate-only access
+        <code>/removegen &lt;id&gt;</code> (alias <code>/deny</code>) — Revoke generate-only access
 
         <b>Customisation &amp; ops</b>
         <code>/buttons</code> — Customise button labels
@@ -742,7 +743,20 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return True
 
     # Owner-only
-    owner_cmds = {"buttons", "logs", "restart", "admins", "gens", "addadmin", "removeadmin", "addgen", "removegen"}
+    owner_cmds = {
+        "buttons", "logs", "restart",
+        "admins", "gens", "users",
+        "addadmin", "removeadmin",
+        "addgen", "removegen",
+        "allow", "deny", "promote", "demote",
+    }
+    alias_map = {
+        "users": "users",      # combined listing
+        "allow": "addgen",
+        "deny": "removegen",
+        "promote": "addadmin",
+        "demote": "removeadmin",
+    }
     if cmd in owner_cmds:
         if not is_owner(user.id):
             await msg.reply_text("This command is restricted to the owner.")
@@ -756,8 +770,16 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await cmd_logs(update, context)
         elif cmd == "restart":
             await cmd_restart(update, context)
+        elif cmd == "users":
+            text = (
+                _format_id_list(ADMIN_IDS, "Administrators")
+                + "\n\n"
+                + _format_id_list(GENERATOR_IDS, "Generator Users")
+            )
+            await msg.reply_text(text, parse_mode=ParseMode.HTML)
         else:
-            await handle_role_command(cmd, args, update, context)
+            real = alias_map.get(cmd, cmd)
+            await handle_role_command(real, args, update, context)
         return True
 
     # Generator-or-better commands
@@ -1235,8 +1257,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     wm_html = ""
     if use_image_wm:
         wm_html = (
-            f"<div class='watermark-img' style='opacity:{opacity};'>"
-            f"<img src='{WATERMARK_IMG_PATH.name}' alt=''/></div>"
+            f"<table class='watermark-img'><tr><td>"
+            f"<img src='{WATERMARK_IMG_PATH.name}' alt='' style='opacity:{opacity};'/>"
+            f"</td></tr></table>"
         )
     elif use_text_wm and watermark_text:
         wm_html = f"<div class='watermark' style='opacity:{opacity};'>{watermark_text}</div>"
@@ -1314,8 +1337,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
   .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
-  .watermark-img {{ position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: -1; }}
-  .watermark-img img {{ width: 140mm; max-width: 80%; }}
+  table.watermark-img {{ position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; border-collapse: collapse; }}
+  table.watermark-img td {{ text-align: center; vertical-align: middle; padding: 0; }}
+  table.watermark-img img {{ width: 110mm; max-width: 70%; height: auto; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 </style>
@@ -1480,9 +1504,20 @@ def main() -> None:
     # never block each other. PTB v21 default is sequential per-update,
     # which is fine because each handler awaits I/O — but PDF rendering is
     # CPU-bound and runs in a thread, releasing the event loop.
+    # Generous HTTP timeouts so large PDF re-uploads (rename) don't time out.
+    from telegram.request import HTTPXRequest
+    req = HTTPXRequest(
+        connection_pool_size=16,
+        connect_timeout=30.0,
+        read_timeout=180.0,
+        write_timeout=180.0,
+        pool_timeout=60.0,
+    )
     app = (
         Application.builder()
         .token(BOT_TOKEN)
+        .request(req)
+        .get_updates_request(HTTPXRequest(connect_timeout=30.0, read_timeout=60.0))
         .post_init(post_init)
         .concurrent_updates(True)
         .build()
