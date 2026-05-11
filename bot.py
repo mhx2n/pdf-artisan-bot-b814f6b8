@@ -1,7 +1,17 @@
-"""CSV → PDF Telegram Bot.
+"""CSV → PDF Telegram Bot — Professional Edition.
 
-Single-panel inline editor. Supports both `/` and `.` command prefixes.
-Admins see the full feature set; standard users get a minimal command list.
+Features
+========
+* Single-panel inline composer (admin / generator / owner).
+* Dual command prefix support: `/cmd` and `.cmd`.
+* Role-based access: Owner, Admins, Generators. Owner can add / remove both.
+* CSV → PDF rendering with themes, watermark (text or image), logo, thumbnail.
+* PDF rename via reply (reply to a generated PDF with the new file name).
+* Inline animated processing message that is replaced by the final file only.
+* Per-user concurrency: each user has an independent lock, so several people
+  can generate PDFs simultaneously without blocking each other.
+* Persistent state (settings, CSV, button labels, roles, assets).
+* Owner-only utilities: /logs, /restart, /buttons, /admins, /gens.
 """
 
 from __future__ import annotations
@@ -20,13 +30,13 @@ import sys
 import textwrap
 import time
 import traceback
-from collections import deque
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 from aiohttp import web
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -39,7 +49,7 @@ from telegram.ext import (
 from weasyprint import HTML
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration & paths
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -48,6 +58,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_PATH = DATA_DIR / "state.json"
 LOG_PATH = DATA_DIR / "bot.log"
 WATERMARK_IMG_PATH = DATA_DIR / "watermark_image.png"
+LOGO_IMG_PATH = DATA_DIR / "logo_image.png"
+THUMB_IMG_PATH = DATA_DIR / "thumbnail_image.jpg"
 
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
@@ -67,7 +79,11 @@ class BufferHandler(logging.Handler):
 _fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 _root = logging.getLogger()
 _root.setLevel(logging.INFO)
-for _h in (logging.StreamHandler(sys.stdout), logging.FileHandler(LOG_PATH, encoding="utf-8"), BufferHandler()):
+for _h in (
+    logging.StreamHandler(sys.stdout),
+    logging.FileHandler(LOG_PATH, encoding="utf-8"),
+    BufferHandler(),
+):
     _h.setFormatter(_fmt)
     _root.addHandler(_h)
 logger = logging.getLogger("csvpdfbot")
@@ -82,6 +98,7 @@ try:
 except ValueError:
     OWNER_ID = 0
 
+
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "title": "Examination Question Paper",
     "subtitle": "Generated from CSV",
@@ -92,8 +109,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "footer_link": "https://t.me/",
     "watermark_enabled": True,
     "watermark_text": "CONFIDENTIAL",
-    "watermark_opacity": 8,           # 0–100
-    "watermark_image_enabled": False,  # if True and image exists, image is used
+    "watermark_opacity": 8,
+    "watermark_image_enabled": False,
     "logo_enabled": True,
     "answer_enabled": True,
     "explanation_enabled": True,
@@ -112,6 +129,8 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
     "footer_link": "Footer Link",
     "watermark_text": "Edit Text",
     "watermark_image": "Watermark Image",
+    "logo_image": "Logo Image",
+    "thumbnail_image": "Thumbnail",
     "watermark_opacity": "Opacity",
     "logo_enabled": "Logo",
     "watermark_enabled": "Watermark",
@@ -126,11 +145,11 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
 }
 
 THEMES = {
-    "green": {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
-    "blue": {"primary": "#1d4ed8", "accent": "#0284c7", "light": "#eff6ff", "border": "#bfdbfe"},
+    "green":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
+    "blue":   {"primary": "#1d4ed8", "accent": "#0284c7", "light": "#eff6ff", "border": "#bfdbfe"},
     "purple": {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
-    "red": {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
-    "black": {"primary": "#111827", "accent": "#374151", "light": "#f9fafb", "border": "#d1d5db"},
+    "red":    {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "black":  {"primary": "#111827", "accent": "#374151", "light": "#f9fafb", "border": "#d1d5db"},
 }
 
 COLUMN_ALIASES = {
@@ -175,8 +194,12 @@ USER_CSV_NAME: Dict[int, str] = {}
 WAITING_FOR: Dict[int, str] = {}
 PANEL_MSG: Dict[int, Tuple[int, int]] = {}
 BUTTON_LABELS: Dict[str, str] = dict(DEFAULT_BUTTON_LABELS)
-ACTIVITY: Dict[int, Dict[str, Any]] = {}  # user_id -> {name, last_action, last_seen}
+ACTIVITY: Dict[int, Dict[str, Any]] = {}
 GENERATION_COUNT = 0
+
+ADMIN_IDS: Set[int] = set()       # full composer access
+GENERATOR_IDS: Set[int] = set()   # generate-only access
+USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _save_state() -> None:
@@ -186,6 +209,8 @@ def _save_state() -> None:
             "button_labels": BUTTON_LABELS,
             "user_csv_name": {str(k): v for k, v in USER_CSV_NAME.items()},
             "user_csv": {str(k): base64.b64encode(v).decode() for k, v in USER_CSV.items()},
+            "admins": list(ADMIN_IDS),
+            "generators": list(GENERATOR_IDS),
         }
         STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
@@ -211,28 +236,53 @@ def _load_state() -> None:
                 USER_CSV[int(k)] = base64.b64decode(v)
             except Exception:
                 pass
+        for uid in payload.get("admins") or []:
+            try: ADMIN_IDS.add(int(uid))
+            except Exception: pass
+        for uid in payload.get("generators") or []:
+            try: GENERATOR_IDS.add(int(uid))
+            except Exception: pass
         logger.info("State restored from %s", STATE_PATH)
     except Exception:
         logger.exception("Failed to load state")
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Roles
 # ---------------------------------------------------------------------------
 
+def is_owner(uid: Optional[int]) -> bool:
+    return bool(uid and OWNER_ID and uid == OWNER_ID)
+
+
+def is_admin(uid: Optional[int]) -> bool:
+    """Owner or explicitly-added admin (full composer)."""
+    return is_owner(uid) or (uid is not None and uid in ADMIN_IDS)
+
+
+def is_generator(uid: Optional[int]) -> bool:
+    """Has at least generate-only access."""
+    return is_admin(uid) or (uid is not None and uid in GENERATOR_IDS)
+
+
+def role_label(uid: int) -> str:
+    if is_owner(uid): return "Owner"
+    if uid in ADMIN_IDS: return "Administrator"
+    if uid in GENERATOR_IDS: return "Generator"
+    return "Guest"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def get_settings(user_id: int) -> Dict[str, Any]:
     if user_id not in USER_SETTINGS:
         USER_SETTINGS[user_id] = DEFAULT_SETTINGS.copy()
     else:
-        # Ensure new keys exist after upgrade
         for k, v in DEFAULT_SETTINGS.items():
             USER_SETTINGS[user_id].setdefault(k, v)
     return USER_SETTINGS[user_id]
-
-
-def is_admin(user_id: Optional[int]) -> bool:
-    return bool(user_id and OWNER_ID and user_id == OWNER_ID)
 
 
 def lbl(key: str) -> str:
@@ -250,11 +300,11 @@ def track(user, action: str) -> None:
     }
 
 
-def main_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
+def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardMarkup:
     def flag(key: str) -> str:
         return "ON" if settings.get(key) else "OFF"
 
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton(lbl("title"), callback_data="set:title"),
             InlineKeyboardButton(lbl("subtitle"), callback_data="set:subtitle"),
@@ -271,14 +321,18 @@ def main_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(f"{lbl('watermark_enabled')} · {flag('watermark_enabled')}", callback_data="toggle:watermark_enabled"),
             InlineKeyboardButton(lbl("watermark_text"), callback_data="set:watermark_text"),
+            InlineKeyboardButton(f"{lbl('watermark_opacity')}: {settings.get('watermark_opacity', 8)}%", callback_data="set:watermark_opacity"),
         ],
         [
-            InlineKeyboardButton(f"{lbl('watermark_opacity')}: {settings.get('watermark_opacity', 8)}%", callback_data="set:watermark_opacity"),
             InlineKeyboardButton(f"{lbl('watermark_image_enabled')} · {flag('watermark_image_enabled')}", callback_data="toggle:watermark_image_enabled"),
             InlineKeyboardButton(lbl("watermark_image"), callback_data="upload:watermark_image"),
         ],
         [
             InlineKeyboardButton(f"{lbl('logo_enabled')} · {flag('logo_enabled')}", callback_data="toggle:logo_enabled"),
+            InlineKeyboardButton(lbl("logo_image"), callback_data="upload:logo_image"),
+            InlineKeyboardButton(lbl("thumbnail_image"), callback_data="upload:thumbnail_image"),
+        ],
+        [
             InlineKeyboardButton(f"{lbl('answer_enabled')} · {flag('answer_enabled')}", callback_data="toggle:answer_enabled"),
             InlineKeyboardButton(f"{lbl('explanation_enabled')} · {flag('explanation_enabled')}", callback_data="toggle:explanation_enabled"),
         ],
@@ -291,6 +345,22 @@ def main_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(lbl("reset"), callback_data="reset"),
             InlineKeyboardButton(lbl("generate"), callback_data="generate"),
         ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def generator_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
+    """Compact panel for generate-only users."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(lbl("title"), callback_data="set:title"),
+         InlineKeyboardButton(lbl("subtitle"), callback_data="set:subtitle")],
+        [InlineKeyboardButton(lbl("set_name"), callback_data="set:set_name"),
+         InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
+         InlineKeyboardButton(lbl("time"), callback_data="set:time")],
+        [InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+         InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme")],
+        [InlineKeyboardButton(lbl("reset"), callback_data="reset"),
+         InlineKeyboardButton(lbl("generate"), callback_data="generate")],
     ])
 
 
@@ -312,8 +382,10 @@ def buttons_editor_keyboard() -> InlineKeyboardMarkup:
 def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None) -> str:
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
-    role = "Administrator" if is_admin(user_id) else "Standard User"
+    role = role_label(user_id)
     wm_mode = "Image" if settings.get("watermark_image_enabled") and WATERMARK_IMG_PATH.exists() else "Text"
+    logo_mode = "Image" if LOGO_IMG_PATH.exists() else "Default"
+    thumb_mode = "Set" if THUMB_IMG_PATH.exists() else "None"
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
@@ -330,6 +402,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     <b>Layout</b>
       • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
       • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
+      • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
 
     <b>Source</b>
       • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
@@ -339,41 +412,81 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     return body
 
 
-def admin_help() -> str:
+def help_text(user_id: int) -> str:
+    if is_owner(user_id):
+        return textwrap.dedent("""
+        <b>Owner Console</b>
+
+        <b>Composer</b>
+        <code>/start</code> — Open composer
+        <code>/panel</code> — Refresh panel
+        <code>/generate</code> — Build the PDF
+        <code>/reset</code> — Restore defaults
+        <code>/status</code> — Current configuration
+        <code>/clear</code> — Remove the loaded CSV
+
+        <b>Access management</b>
+        <code>/admins</code> — List administrators
+        <code>/addadmin &lt;id&gt;</code> — Promote a user to administrator
+        <code>/removeadmin &lt;id&gt;</code> — Revoke administrator access
+        <code>/gens</code> — List generator users
+        <code>/addgen &lt;id&gt;</code> — Grant generate-only access
+        <code>/removegen &lt;id&gt;</code> — Revoke generate-only access
+
+        <b>Customisation &amp; ops</b>
+        <code>/buttons</code> — Customise button labels
+        <code>/logs</code> — Activity, memory &amp; recent errors
+        <code>/restart</code> — Restart the bot (state preserved)
+        <code>/help</code> — Show this message
+
+        <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
+
+        <i>All commands also accept the </i><code>.</code><i> prefix.</i>
+        """).strip()
+
+    if is_admin(user_id):
+        return textwrap.dedent("""
+        <b>Administrator Commands</b>
+
+        <code>/start</code> — Open composer
+        <code>/panel</code> — Refresh panel
+        <code>/generate</code> — Build the PDF
+        <code>/reset</code> — Restore defaults
+        <code>/status</code> — Current configuration
+        <code>/clear</code> — Remove the loaded CSV
+        <code>/help</code> — Show this message
+
+        <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
+
+        <i>All commands also accept the </i><code>.</code><i> prefix.</i>
+        """).strip()
+
+    if is_generator(user_id):
+        return textwrap.dedent("""
+        <b>Available Commands</b>
+
+        <code>/start</code> — Open the generator panel
+        <code>/generate</code> — Build the PDF from your CSV
+        <code>/reset</code> — Restore defaults
+        <code>/clear</code> — Remove the loaded CSV
+        <code>/help</code> — Show this message
+
+        <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
+
+        <i>All commands also accept the </i><code>.</code><i> prefix.</i>
+        """).strip()
+
     return textwrap.dedent("""
-    <b>Administrator Commands</b>
+    <b>Restricted Service</b>
 
-    <code>/start</code> — Open the composer panel
-    <code>/panel</code> — Re-open or refresh the panel
-    <code>/generate</code> — Build the PDF from the current CSV
-    <code>/reset</code> — Restore default settings
-    <code>/status</code> — Show current configuration
-    <code>/clear</code> — Remove the loaded CSV file
-    <code>/buttons</code> — Customise button labels &amp; emojis
-    <code>/logs</code> — Live activity, memory &amp; recent errors
-    <code>/restart</code> — Restart the bot (state is preserved)
-    <code>/help</code> — Show this message
-
-    <i>All commands also work with the </i><code>.</code><i> prefix (e.g. </i><code>.start</code><i>).</i>
-    """).strip()
-
-
-def user_help() -> str:
-    return textwrap.dedent("""
-    <b>Available Commands</b>
-
-    <code>/start</code> — Get started
-    <code>/help</code> — Show this message
-
-    <i>This service is restricted to authorised users.
-    Please contact the administrator for access.</i>
+    This is a private utility. Please contact the administrator to request
+    access. Provide your numeric Telegram ID when requesting permission.
     """).strip()
 
 
 # ---------------------------------------------------------------------------
 # Panel rendering
 # ---------------------------------------------------------------------------
-
 
 async def send_or_update_panel(
     update: Update,
@@ -385,22 +498,31 @@ async def send_or_update_panel(
     if not user:
         return
     user_id = user.id
+    if not is_generator(user_id):
+        return
     settings = get_settings(user_id)
 
-    if waiting_field == "watermark_image":
-        text = panel_text(user_id, settings, note) + "\n\n<b>Awaiting upload</b>\nSend a PNG / JPG image to use as watermark."
+    if waiting_field in {"watermark_image", "logo_image", "thumbnail_image"}:
+        kind = {"watermark_image": "watermark", "logo_image": "logo", "thumbnail_image": "thumbnail"}[waiting_field]
+        text = panel_text(user_id, settings, note) + (
+            f"\n\n<b>Awaiting upload</b>\nSend a PNG or JPG image to use as {kind}."
+        )
         markup = cancel_keyboard()
     elif waiting_field and waiting_field.startswith("btnlabel:"):
         key = waiting_field.split(":", 1)[1]
-        text = panel_text(user_id, settings, note) + f"\n\n<b>Awaiting input</b>\nReply with the new label (emoji allowed) for <b>{html.escape(key)}</b>."
+        text = panel_text(user_id, settings, note) + (
+            f"\n\n<b>Awaiting input</b>\nReply with the new label (emoji allowed) for <b>{html.escape(key)}</b>."
+        )
         markup = cancel_keyboard()
     elif waiting_field:
         label = FIELD_LABELS.get(waiting_field, waiting_field)
-        text = panel_text(user_id, settings, note) + f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
+        text = panel_text(user_id, settings, note) + (
+            f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
+        )
         markup = cancel_keyboard()
     else:
         text = panel_text(user_id, settings, note)
-        markup = main_keyboard(settings)
+        markup = main_keyboard(settings, is_admin(user_id)) if is_admin(user_id) else generator_keyboard(settings)
 
     chat_id = update.effective_chat.id if update.effective_chat else user_id
     panel = PANEL_MSG.get(user_id)
@@ -429,7 +551,6 @@ async def send_or_update_panel(
 # Owner-only utilities
 # ---------------------------------------------------------------------------
 
-
 def _format_uptime(seconds: float) -> str:
     s = int(seconds)
     d, s = divmod(s, 86400)
@@ -446,7 +567,6 @@ def _format_uptime(seconds: float) -> str:
 def _memory_mb() -> float:
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # Linux: KB; macOS: bytes
         if sys.platform == "darwin":
             return usage / (1024 * 1024)
         return usage / 1024
@@ -456,7 +576,7 @@ def _memory_mb() -> float:
 
 def build_logs_text() -> str:
     now = time.time()
-    active_window = 600  # 10 minutes
+    active_window = 600
     active = [a for a in ACTIVITY.values() if now - a["last_seen"] < active_window]
     recent_errors = [(t, m) for (t, m) in ERROR_BUFFER if now - t < 3600]
 
@@ -466,7 +586,7 @@ def build_logs_text() -> str:
     lines.append(f"  • Memory: <code>{_memory_mb():.1f} MB</code>")
     lines.append(f"  • PID: <code>{os.getpid()}</code>")
     lines.append(f"  • Generated PDFs: <code>{GENERATION_COUNT}</code>")
-    lines.append(f"  • Persisted users: <code>{len(USER_SETTINGS)}</code>")
+    lines.append(f"  • Admins: <code>{len(ADMIN_IDS)}</code> · Generators: <code>{len(GENERATOR_IDS)}</code>")
     lines.append("")
     lines.append(f"<b>Active Users (last 10 min): {len(active)}</b>")
     if active:
@@ -505,7 +625,6 @@ async def cmd_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     _save_state()
     await msg.reply_text("⟳ Restart initiated. State preserved.", parse_mode=ParseMode.HTML)
-    # Persist a marker so we can announce successful restart
     try:
         (DATA_DIR / "restart_target.json").write_text(
             json.dumps({"chat_id": msg.chat_id}), encoding="utf-8"
@@ -518,9 +637,83 @@ async def cmd_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Command dispatcher (supports / and .)
+# Role management commands
 # ---------------------------------------------------------------------------
 
+def _parse_target_id(msg, args: str) -> Optional[int]:
+    """Accept a numeric ID in args, or the user_id of a replied-to message."""
+    if args:
+        m = re.search(r"-?\d+", args)
+        if m:
+            try: return int(m.group(0))
+            except Exception: return None
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        return msg.reply_to_message.from_user.id
+    return None
+
+
+def _format_id_list(ids: Set[int], title: str) -> str:
+    if not ids:
+        return f"<b>{title}</b>\n  • <i>None</i>"
+    out = [f"<b>{title}</b>"]
+    for uid in sorted(ids):
+        info = ACTIVITY.get(uid)
+        name = html.escape(info["name"]) if info else f"User {uid}"
+        out.append(f"  • <code>{uid}</code> — {name}")
+    return "\n".join(out)
+
+
+async def handle_role_command(cmd: str, args: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+
+    if cmd == "admins":
+        await msg.reply_text(_format_id_list(ADMIN_IDS, "Administrators"), parse_mode=ParseMode.HTML)
+        return
+    if cmd == "gens":
+        await msg.reply_text(_format_id_list(GENERATOR_IDS, "Generator Users"), parse_mode=ParseMode.HTML)
+        return
+
+    target = _parse_target_id(msg, args)
+    if not target:
+        await msg.reply_text(
+            "Provide a numeric user ID or reply to that user's message.\n"
+            "Example: <code>/addadmin 123456789</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if target == OWNER_ID:
+        await msg.reply_text("The owner already holds full privileges.")
+        return
+
+    if cmd == "addadmin":
+        ADMIN_IDS.add(target); GENERATOR_IDS.discard(target); _save_state()
+        await msg.reply_text(f"✓ Added <code>{target}</code> as administrator.", parse_mode=ParseMode.HTML)
+    elif cmd == "removeadmin":
+        if target in ADMIN_IDS:
+            ADMIN_IDS.discard(target); _save_state()
+            await msg.reply_text(f"✓ Removed administrator <code>{target}</code>.", parse_mode=ParseMode.HTML)
+        else:
+            await msg.reply_text("That user is not an administrator.")
+    elif cmd == "addgen":
+        if target in ADMIN_IDS:
+            await msg.reply_text("That user is already an administrator.")
+            return
+        GENERATOR_IDS.add(target); _save_state()
+        await msg.reply_text(f"✓ Granted generate-only access to <code>{target}</code>.", parse_mode=ParseMode.HTML)
+    elif cmd == "removegen":
+        if target in GENERATOR_IDS:
+            GENERATOR_IDS.discard(target); _save_state()
+            await msg.reply_text(f"✓ Revoked access for <code>{target}</code>.", parse_mode=ParseMode.HTML)
+        else:
+            await msg.reply_text("That user does not have generator access.")
+
+
+# ---------------------------------------------------------------------------
+# Command dispatcher (supports / and .)
+# ---------------------------------------------------------------------------
 
 COMMAND_RE = re.compile(r"^[\/\.]([a-zA-Z_]+)(?:@\S+)?(?:\s+(.*))?$", re.DOTALL)
 
@@ -533,43 +726,62 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not match:
         return False
     cmd = match.group(1).lower()
+    args = match.group(2) or ""
     user = update.effective_user
     if not user:
         return True
 
-    admin = is_admin(user.id)
     track(user, f"/{cmd}")
 
+    # Public commands
+    if cmd == "help":
+        await msg.reply_text(help_text(user.id), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        return True
     if cmd == "start":
         await cmd_start(update, context)
-    elif cmd == "help":
-        await msg.reply_text(admin_help() if admin else user_help(),
-                             parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    elif cmd in {"panel", "menu"} and admin:
-        PANEL_MSG.pop(user.id, None)
-        await send_or_update_panel(update, context)
-    elif cmd == "generate" and admin:
-        await generate_for_user(update, context)
-    elif cmd == "reset" and admin:
-        USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
-        _save_state()
-        await send_or_update_panel(update, context, note="Settings restored to defaults.")
-    elif cmd == "status" and admin:
-        await send_or_update_panel(update, context)
-    elif cmd == "clear" and admin:
-        USER_CSV.pop(user.id, None)
-        USER_CSV_NAME.pop(user.id, None)
-        _save_state()
-        await send_or_update_panel(update, context, note="CSV cleared.")
-    elif cmd == "buttons" and admin:
-        await msg.reply_text("<b>Button Editor</b>\nSelect a button to rename (emoji supported).",
-                             parse_mode=ParseMode.HTML, reply_markup=buttons_editor_keyboard())
-    elif cmd == "logs" and admin:
-        await cmd_logs(update, context)
-    elif cmd == "restart" and admin:
-        await cmd_restart(update, context)
-    else:
-        await msg.reply_text("Unknown command." if admin else "This command is not available for your account.")
+        return True
+
+    # Owner-only
+    owner_cmds = {"buttons", "logs", "restart", "admins", "gens", "addadmin", "removeadmin", "addgen", "removegen"}
+    if cmd in owner_cmds:
+        if not is_owner(user.id):
+            await msg.reply_text("This command is restricted to the owner.")
+            return True
+        if cmd == "buttons":
+            await msg.reply_text(
+                "<b>Button Editor</b>\nSelect a button to rename (emoji supported).",
+                parse_mode=ParseMode.HTML, reply_markup=buttons_editor_keyboard(),
+            )
+        elif cmd == "logs":
+            await cmd_logs(update, context)
+        elif cmd == "restart":
+            await cmd_restart(update, context)
+        else:
+            await handle_role_command(cmd, args, update, context)
+        return True
+
+    # Generator-or-better commands
+    gen_cmds = {"panel", "menu", "generate", "reset", "status", "clear"}
+    if cmd in gen_cmds:
+        if not is_generator(user.id):
+            await msg.reply_text("This command is not available for your account.")
+            return True
+        if cmd in {"panel", "menu"}:
+            PANEL_MSG.pop(user.id, None)
+            await send_or_update_panel(update, context)
+        elif cmd == "generate":
+            await generate_for_user(update, context)
+        elif cmd == "reset":
+            USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy(); _save_state()
+            await send_or_update_panel(update, context, note="Settings restored to defaults.")
+        elif cmd == "status":
+            await send_or_update_panel(update, context)
+        elif cmd == "clear":
+            USER_CSV.pop(user.id, None); USER_CSV_NAME.pop(user.id, None); _save_state()
+            await send_or_update_panel(update, context, note="CSV cleared.")
+        return True
+
+    await msg.reply_text("Unknown command.")
     return True
 
 
@@ -577,17 +789,17 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # Handlers
 # ---------------------------------------------------------------------------
 
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     msg = update.effective_message
     if not user or not msg:
         return
-    if not is_admin(user.id):
+    if not is_generator(user.id):
         await msg.reply_text(
             "Welcome.\n\nThis is a private CSV → PDF utility. "
-            "Access is limited to authorised administrators.\n\n"
-            "Type <code>/help</code> to view available commands.",
+            "Access is limited to authorised users.\n\n"
+            f"Your Telegram ID: <code>{user.id}</code>\n"
+            "Please share this ID with the administrator to request access.",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -602,11 +814,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not msg or not user:
         return
 
+    # PDF rename via reply
+    if (
+        msg.reply_to_message
+        and msg.reply_to_message.document
+        and (msg.reply_to_message.document.mime_type or "").lower() == "application/pdf"
+        and is_generator(user.id)
+        and msg.text and not msg.text.startswith(("/", "."))
+    ):
+        await rename_pdf_via_reply(update, context)
+        return
+
     if msg.text and msg.text[:1] in "/.":
         if await dispatch_command(update, context):
             return
 
-    if not is_admin(user.id):
+    if not is_generator(user.id):
         return
 
     field = WAITING_FOR.pop(user.id, "")
@@ -617,6 +840,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     note = ""
 
     if field.startswith("btnlabel:"):
+        if not is_owner(user.id):
+            return
         key = field.split(":", 1)[1]
         if key in DEFAULT_BUTTON_LABELS:
             BUTTON_LABELS[key] = value or DEFAULT_BUTTON_LABELS[key]
@@ -635,11 +860,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             note = f"{FIELD_LABELS.get(field, field)} updated."
 
     _save_state()
-
-    try:
-        await msg.delete()
-    except Exception:
-        pass
+    try: await msg.delete()
+    except Exception: pass
 
     track(user, f"set {field}")
     await send_or_update_panel(update, context, note=note)
@@ -651,8 +873,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     await query.answer()
     user = update.effective_user
-    if not user or not is_admin(user.id):
-        await query.answer("Restricted.", show_alert=True)
+    if not user or not is_generator(user.id):
+        try: await query.answer("Restricted.", show_alert=True)
+        except Exception: pass
         return
 
     track(user, f"btn:{query.data}")
@@ -661,57 +884,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
-    if data == "logs:refresh":
-        try:
-            await query.edit_message_text(
-                build_logs_text(), parse_mode=ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Refresh", callback_data="logs:refresh"),
-                    InlineKeyboardButton("Download Log File", callback_data="logs:download"),
-                ]]), disable_web_page_preview=True,
-            )
-        except BadRequest:
-            pass
+    # Owner-only: logs / button editor
+    if data in {"logs:refresh", "logs:download"} or data.startswith("btnedit:") or data in {"btnreset", "btnclose"}:
+        if not is_owner(user.id):
+            return
+        if data == "logs:refresh":
+            try:
+                await query.edit_message_text(
+                    build_logs_text(), parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Refresh", callback_data="logs:refresh"),
+                        InlineKeyboardButton("Download Log File", callback_data="logs:download"),
+                    ]]), disable_web_page_preview=True,
+                )
+            except BadRequest:
+                pass
+            return
+        if data == "logs:download":
+            if LOG_PATH.exists():
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id, document=LOG_PATH.open("rb"),
+                    filename="bot.log", caption="Full log file.",
+                )
+            else:
+                await query.answer("No log file yet.", show_alert=True)
+            return
+        if data.startswith("btnedit:"):
+            key = data.split(":", 1)[1]
+            WAITING_FOR[user.id] = f"btnlabel:{key}"
+            waiting_field = f"btnlabel:{key}"
+        elif data == "btnreset":
+            BUTTON_LABELS.clear(); BUTTON_LABELS.update(DEFAULT_BUTTON_LABELS); _save_state()
+            try: await query.edit_message_reply_markup(reply_markup=buttons_editor_keyboard())
+            except BadRequest: pass
+            return
+        elif data == "btnclose":
+            try: await query.message.delete()
+            except Exception: pass
+            return
+
+    # Admin-only image uploads & toggles
+    admin_only_actions = {
+        "upload:watermark_image", "upload:logo_image", "upload:thumbnail_image",
+        "toggle:watermark_enabled", "toggle:watermark_image_enabled", "toggle:logo_enabled",
+        "toggle:answer_enabled", "toggle:explanation_enabled",
+        "set:watermark_text", "set:watermark_opacity",
+        "set:footer_text", "set:footer_link",
+        "cycle:page_size",
+    }
+    if data in admin_only_actions and not is_admin(user.id):
+        try: await query.answer("Administrator only.", show_alert=True)
+        except Exception: pass
         return
 
-    if data == "logs:download":
-        if LOG_PATH.exists():
-            await context.bot.send_document(
-                chat_id=query.message.chat_id,
-                document=LOG_PATH.open("rb"),
-                filename="bot.log",
-                caption="Full log file.",
-            )
-        else:
-            await query.answer("No log file yet.", show_alert=True)
-        return
-
-    if data.startswith("btnedit:"):
-        key = data.split(":", 1)[1]
-        WAITING_FOR[user.id] = f"btnlabel:{key}"
-        waiting_field = f"btnlabel:{key}"
-    elif data == "btnreset":
-        BUTTON_LABELS.clear()
-        BUTTON_LABELS.update(DEFAULT_BUTTON_LABELS)
-        _save_state()
-        try:
-            await query.edit_message_reply_markup(reply_markup=buttons_editor_keyboard())
-        except BadRequest:
-            pass
-        return
-    elif data == "btnclose":
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        return
-    elif data.startswith("set:"):
+    if data.startswith("set:"):
         field = data.split(":", 1)[1]
         WAITING_FOR[user.id] = field
         waiting_field = field
-    elif data == "upload:watermark_image":
-        WAITING_FOR[user.id] = "watermark_image"
-        waiting_field = "watermark_image"
+    elif data.startswith("upload:"):
+        kind = data.split(":", 1)[1]
+        WAITING_FOR[user.id] = kind
+        waiting_field = kind
     elif data.startswith("toggle:"):
         field = data.split(":", 1)[1]
         settings[field] = not bool(settings.get(field))
@@ -737,12 +970,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await send_or_update_panel(update, context, note=note, waiting_field=waiting_field)
 
 
+async def _save_image_upload(context, doc_or_photo, target: Path) -> None:
+    file_id = doc_or_photo.file_id
+    tg_file = await context.bot.get_file(file_id)
+    await tg_file.download_to_drive(custom_path=str(target))
+
+
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user:
         return
-    if not is_admin(user.id):
+    if not is_generator(user.id):
         await msg.reply_text("Restricted.")
         return
     track(user, "upload document")
@@ -755,20 +994,26 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     mime = (doc.mime_type or "").lower()
     is_image = mime.startswith("image/") or file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
-    # Image upload for watermark
-    if WAITING_FOR.get(user.id) == "watermark_image" or is_image:
-        if not is_image:
-            await msg.reply_text("Please send a PNG or JPG image.")
+    waiting = WAITING_FOR.get(user.id, "")
+    image_targets = {
+        "watermark_image": (WATERMARK_IMG_PATH, "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (LOGO_IMG_PATH, "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (THUMB_IMG_PATH, None, "Thumbnail image saved."),
+    }
+
+    if waiting in image_targets and is_image:
+        if not is_admin(user.id):
+            await msg.reply_text("Administrator only.")
             return
+        target, enable_key, note = image_targets[waiting]
         WAITING_FOR.pop(user.id, None)
-        tg_file = await context.bot.get_file(doc.file_id)
-        await tg_file.download_to_drive(custom_path=str(WATERMARK_IMG_PATH))
-        s = get_settings(user.id)
-        s["watermark_image_enabled"] = True
+        await _save_image_upload(context, doc, target)
+        if enable_key:
+            get_settings(user.id)[enable_key] = True
         _save_state()
         try: await msg.delete()
         except Exception: pass
-        await send_or_update_panel(update, context, note="Watermark image saved and enabled.")
+        await send_or_update_panel(update, context, note=note)
         return
 
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
@@ -791,28 +1036,95 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     user = update.effective_user
-    if not msg or not user or not is_admin(user.id):
+    if not msg or not user or not is_generator(user.id):
         return
-    if WAITING_FOR.get(user.id) != "watermark_image":
+    waiting = WAITING_FOR.get(user.id, "")
+    image_targets = {
+        "watermark_image": (WATERMARK_IMG_PATH, "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (LOGO_IMG_PATH, "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (THUMB_IMG_PATH, None, "Thumbnail image saved."),
+    }
+    if waiting not in image_targets:
+        return
+    if not is_admin(user.id):
+        await msg.reply_text("Administrator only.")
         return
     photo = msg.photo[-1] if msg.photo else None
     if not photo:
         return
+    target, enable_key, note = image_targets[waiting]
     WAITING_FOR.pop(user.id, None)
-    tg_file = await context.bot.get_file(photo.file_id)
-    await tg_file.download_to_drive(custom_path=str(WATERMARK_IMG_PATH))
-    s = get_settings(user.id)
-    s["watermark_image_enabled"] = True
+    await _save_image_upload(context, photo, target)
+    if enable_key:
+        get_settings(user.id)[enable_key] = True
     _save_state()
     try: await msg.delete()
     except Exception: pass
-    await send_or_update_panel(update, context, note="Watermark image saved and enabled.")
+    await send_or_update_panel(update, context, note=note)
+
+
+# ---------------------------------------------------------------------------
+# PDF rename via reply
+# ---------------------------------------------------------------------------
+
+INVALID_FN = re.compile(r'[\\/:*?"<>|\r\n\t]+')
+
+
+async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    target_msg = msg.reply_to_message
+    doc = target_msg.document
+    if not doc:
+        return
+    new_name = INVALID_FN.sub(" ", (msg.text or "").strip()).strip()
+    if not new_name:
+        await msg.reply_text("Please provide a valid file name.")
+        return
+    if not new_name.lower().endswith(".pdf"):
+        new_name += ".pdf"
+
+    track(user, "rename pdf")
+    progress = await context.bot.send_message(chat_id=msg.chat_id, text="⟳ Renaming document…")
+    try:
+        tg_file = await context.bot.get_file(doc.file_id)
+        data = bytes(await tg_file.download_as_bytearray())
+        bio = io.BytesIO(data)
+        bio.name = new_name
+
+        thumb = None
+        if THUMB_IMG_PATH.exists():
+            thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+
+        await context.bot.send_document(
+            chat_id=msg.chat_id,
+            document=InputFile(bio, filename=new_name),
+            filename=new_name,
+            thumbnail=thumb,
+        )
+        try: await context.bot.delete_message(chat_id=msg.chat_id, message_id=progress.message_id)
+        except Exception: pass
+        try: await msg.delete()
+        except Exception: pass
+        try: await target_msg.delete()
+        except Exception: pass
+    except Exception as exc:
+        logger.exception("Rename failed")
+        try:
+            await context.bot.edit_message_text(
+                chat_id=msg.chat_id, message_id=progress.message_id,
+                text=f"⚠ Rename failed: {html.escape(str(exc))}",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
 # CSV → HTML → PDF
 # ---------------------------------------------------------------------------
-
 
 def decode_csv(data: bytes) -> str:
     for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
@@ -894,6 +1206,7 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
+    # Pill-shaped number badge: scales naturally for 1, 2, or 3 digits.
     return f"""
     <article class='question'>
       <table class='q-head'><tr>
@@ -928,6 +1241,19 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     elif use_text_wm and watermark_text:
         wm_html = f"<div class='watermark' style='opacity:{opacity};'>{watermark_text}</div>"
 
+    # Header logo: image if uploaded, otherwise the "PDF" badge.
+    if settings.get("logo_enabled"):
+        if LOGO_IMG_PATH.exists():
+            logo_html = (
+                "<td class='logo'>"
+                f"<div class='logo-circle'><img src='{LOGO_IMG_PATH.name}' alt='logo'/></div>"
+                "</td>"
+            )
+        else:
+            logo_html = "<td class='logo'><div class='logo-circle logo-text'>PDF</div></td>"
+    else:
+        logo_html = ""
+
     return f"""<!doctype html>
 <html lang='en'>
 <head>
@@ -942,25 +1268,44 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 
   .header {{ width: 100%; border: 1.5px solid {theme['primary']}; border-radius: 8px; background: {theme['light']}; margin-bottom: 12px; }}
   .header td {{ padding: 10px 12px; vertical-align: middle; }}
-  .header .logo {{ width: 52px; }}
-  .header .logo div {{ width: 44px; height: 44px; border-radius: 50%; background: {theme['primary']}; color: #fff; text-align: center; line-height: 44px; font-weight: 800; font-size: 13pt; }}
-  .header h1 {{ margin: 0; color: {theme['primary']}; font-size: 18pt; font-weight: 800; }}
+  .header .logo {{ width: 64px; padding-right: 0; text-align: center; }}
+  .header .logo-circle {{
+      width: 52px; height: 52px; border-radius: 50%;
+      background: {theme['primary']}; color: #fff;
+      margin: 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      font-weight: 800; font-size: 13pt;
+      font-family: 'DejaVu Sans', sans-serif;
+  }}
+  .header .logo-circle img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
+  .header .logo-text {{ line-height: 52px; }}
+  .header h1 {{ margin: 0; color: {theme['primary']}; font-size: 17pt; font-weight: 800; }}
   .header .subtitle {{ margin-top: 2px; color: #374151; font-size: 10.5pt; }}
-  .header .meta {{ text-align: right; font-weight: 700; white-space: nowrap; width: 1%; }}
+  .header .meta {{ text-align: right; font-weight: 700; white-space: nowrap; width: 1%; font-size: 10pt; line-height: 1.5; }}
 
-  .paper {{ column-count: {columns}; column-gap: 10mm; column-rule: 0.5px solid {theme['border']}; }}
+  .paper {{ column-count: {columns}; column-gap: 10mm; column-rule: 0.5px solid {theme['border']}; column-fill: auto; }}
   .question {{ break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; margin-bottom: 9px; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
-  td.q-no {{ width: 26px; vertical-align: top; padding: 0; }}
-  .q-circle {{ display: inline-block; width: 20px; height: 20px; line-height: 20px; border-radius: 50%; background: {theme['primary']}; color: #fff; text-align: center; font-weight: 700; font-size: 9pt; font-family: 'DejaVu Sans', sans-serif; }}
+  td.q-no {{ width: 30px; vertical-align: top; padding: 0; }}
+  .q-circle {{
+      display: inline-block;
+      min-width: 22px; height: 22px;
+      line-height: 22px; padding: 0 6px;
+      border-radius: 11px;
+      background: {theme['primary']}; color: #fff;
+      text-align: center; font-weight: 700; font-size: 9.5pt;
+      font-family: 'DejaVu Sans', sans-serif;
+      box-sizing: border-box;
+  }}
   td.q-text {{ padding-left: 8px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
 
-  table.options {{ table-layout: fixed; margin: 4px 0 0 28px; width: calc(100% - 28px); }}
+  table.options {{ table-layout: fixed; margin: 4px 0 0 32px; width: calc(100% - 32px); }}
   table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
-  .answer, .explanation {{ margin: 5px 0 0 28px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
+  .answer, .explanation {{ margin: 5px 0 0 32px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
 
   .frac {{ display: inline-block; vertical-align: middle; text-align: center; line-height: 1; font-size: 0.9em; }}
   .frac span {{ display: block; }}
@@ -980,7 +1325,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   <div class='footer'>{footer_text}{(' — <a href="' + footer_link + '">' + footer_link + '</a>') if footer_link else ''}</div>
 
   <table class='header'><tr>
-    {('<td class="logo"><div>PDF</div></td>') if settings.get('logo_enabled') else ''}
+    {logo_html}
     <td>
       <h1>{html.escape(settings.get('title', ''))}</h1>
       <div class='subtitle'>{html.escape(settings.get('subtitle', ''))}</div>
@@ -996,10 +1341,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any]) -> bytes:
     rows = parse_csv(csv_data)
     html_string = build_html(rows, settings)
-    # Use DATA_DIR as base so watermark image resolves; fonts referenced via BASE_DIR fallback
-    # WeasyPrint resolves both — copy font path absolute via base_url to BASE_DIR if no image.
-    base_url = str(DATA_DIR) if WATERMARK_IMG_PATH.exists() else str(BASE_DIR)
-    # Inject fonts absolute path
+    base_url = str(DATA_DIR)
     html_string = html_string.replace(
         "url('fonts/NotoSansBengali-Regular.ttf')",
         f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
@@ -1013,73 +1355,85 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     msg = update.effective_message
     if not user or not msg:
         return
+    if not is_generator(user.id):
+        return
+
     csv_data = USER_CSV.get(user.id)
     if not csv_data:
         await send_or_update_panel(update, context, note="No CSV uploaded yet.")
         return
 
     settings = get_settings(user.id).copy()
-    track(user, "generating PDF")
     chat_id = msg.chat.id
+    track(user, "generating PDF")
 
-    # Inline processing message (separate from main panel)
-    progress = await context.bot.send_message(chat_id=chat_id, text="⟳ Processing… preparing your document.")
-    stop_flag = {"v": False}
+    lock = USER_LOCKS[user.id]
+    if lock.locked():
+        await context.bot.send_message(chat_id=chat_id, text="A previous job is still running. Please wait…")
+        return
 
-    async def animate():
-        dots = ["⟳ Processing", "⟳ Processing.", "⟳ Processing..", "⟳ Processing..."]
-        i = 0
-        while not stop_flag["v"]:
+    async with lock:
+        progress = await context.bot.send_message(chat_id=chat_id, text="⟳ Processing… preparing your document.")
+        stop_flag = {"v": False}
+
+        async def animate():
+            dots = ["⟳ Processing", "⟳ Processing.", "⟳ Processing..", "⟳ Processing..."]
+            i = 0
+            while not stop_flag["v"]:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id, message_id=progress.message_id,
+                        text=f"{dots[i % 4]}\n<i>Rendering PDF, please wait…</i>",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(1.2)
+                i += 1
+
+        anim_task = asyncio.create_task(animate())
+
+        try:
+            await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings)
+            stop_flag["v"] = True
+            anim_task.cancel()
+            try: await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
+            except Exception: pass
+
+            base = USER_CSV_NAME.get(user.id, "document.csv")
+            filename = re.sub(r"\.csv$", "", base, flags=re.IGNORECASE) + ".pdf"
+
+            bio = io.BytesIO(pdf_bytes)
+            bio.name = filename
+            thumb = None
+            if THUMB_IMG_PATH.exists():
+                thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=InputFile(bio, filename=filename),
+                filename=filename,
+                thumbnail=thumb,
+            )
+            GENERATION_COUNT += 1
+        except Exception as exc:
+            stop_flag["v"] = True
+            anim_task.cancel()
+            logger.exception("PDF generation failed")
             try:
                 await context.bot.edit_message_text(
                     chat_id=chat_id, message_id=progress.message_id,
-                    text=f"{dots[i % 4]}\n<i>Rendering PDF, please wait…</i>",
+                    text=f"⚠ Generation failed: {html.escape(str(exc))}",
                     parse_mode=ParseMode.HTML,
                 )
             except Exception:
                 pass
-            await asyncio.sleep(1.2)
-            i += 1
-
-    anim_task = asyncio.create_task(animate())
-
-    try:
-        await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
-        pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings)
-        stop_flag["v"] = True
-        anim_task.cancel()
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
-        except Exception:
-            pass
-
-        bio = io.BytesIO(pdf_bytes)
-        bio.name = "document.pdf"
-        await context.bot.send_document(
-            chat_id=chat_id, document=bio, filename="document.pdf",
-            caption="Document generated successfully.",
-        )
-        GENERATION_COUNT += 1
-        await send_or_update_panel(update, context, note="PDF delivered.")
-    except Exception as exc:
-        stop_flag["v"] = True
-        anim_task.cancel()
-        logger.exception("PDF generation failed")
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id, message_id=progress.message_id,
-                text=f"⚠ Generation failed: {html.escape(str(exc))}",
-                parse_mode=ParseMode.HTML,
-            )
-        except Exception:
-            pass
-        await send_or_update_panel(update, context, note="Generation failed.")
 
 
 # ---------------------------------------------------------------------------
 # Health server (Render web service)
 # ---------------------------------------------------------------------------
-
 
 async def health(_: web.Request) -> web.Response:
     return web.Response(text="OK", status=200)
@@ -1100,7 +1454,6 @@ async def start_health_server() -> web.AppRunner:
 async def post_init(app: Application) -> None:
     await start_health_server()
     logger.info("Bot started successfully")
-    # Notify owner if a restart marker exists
     marker = DATA_DIR / "restart_target.json"
     if marker.exists():
         try:
@@ -1123,7 +1476,17 @@ def main() -> None:
 
     _load_state()
 
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # Concurrency: process several updates in parallel so multiple users
+    # never block each other. PTB v21 default is sequential per-update,
+    # which is fine because each handler awaits I/O — but PDF rendering is
+    # CPU-bound and runs in a thread, releasing the event loop.
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .concurrent_updates(True)
+        .build()
+    )
     app.add_handler(MessageHandler(filters.TEXT, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
