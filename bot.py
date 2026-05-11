@@ -742,7 +742,20 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return True
 
     # Owner-only
-    owner_cmds = {"buttons", "logs", "restart", "admins", "gens", "addadmin", "removeadmin", "addgen", "removegen"}
+    owner_cmds = {
+        "buttons", "logs", "restart",
+        "admins", "gens", "users",
+        "addadmin", "removeadmin",
+        "addgen", "removegen",
+        "allow", "deny", "promote", "demote",
+    }
+    alias_map = {
+        "users": "users",      # combined listing
+        "allow": "addgen",
+        "deny": "removegen",
+        "promote": "addadmin",
+        "demote": "removeadmin",
+    }
     if cmd in owner_cmds:
         if not is_owner(user.id):
             await msg.reply_text("This command is restricted to the owner.")
@@ -756,8 +769,16 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await cmd_logs(update, context)
         elif cmd == "restart":
             await cmd_restart(update, context)
+        elif cmd == "users":
+            text = (
+                _format_id_list(ADMIN_IDS, "Administrators")
+                + "\n\n"
+                + _format_id_list(GENERATOR_IDS, "Generator Users")
+            )
+            await msg.reply_text(text, parse_mode=ParseMode.HTML)
         else:
-            await handle_role_command(cmd, args, update, context)
+            real = alias_map.get(cmd, cmd)
+            await handle_role_command(real, args, update, context)
         return True
 
     # Generator-or-better commands
