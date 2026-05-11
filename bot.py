@@ -1284,7 +1284,17 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 <title>{html.escape(settings.get('title', 'PDF'))}</title>
 <style>
   @font-face {{ font-family: 'Noto Sans Bengali'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
-  @page {{ size: {size}; margin: 14mm 12mm 16mm; @bottom-center {{ content: element(footer); }} }}
+  @page {{
+      size: {size};
+      margin: 14mm 12mm 18mm;
+      @bottom-center {{ content: element(footer); }}
+      @bottom-right {{
+          content: "Page " counter(page) " of " counter(pages);
+          font-family: 'DejaVu Sans', sans-serif;
+          font-size: 8.5pt; color: #6b7280;
+          padding-bottom: 4mm;
+      }}
+  }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: 'Noto Sans Bengali', 'DejaVu Sans', 'Helvetica', sans-serif; color: #111827; line-height: 1.5; font-size: 10.5pt; margin: 0; }}
   table {{ border-collapse: collapse; width: 100%; }}
