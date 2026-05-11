@@ -1224,7 +1224,15 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     explanation = row.get("explanation", "")
     extras = ""
     if settings.get("answer_enabled") and answer:
-        extras += f"<div class='answer'><b>Answer:</b> {render_inline_math(answer)}</div>"
+        ans_str = str(answer).strip()
+        num_to_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}
+        if ans_str in num_to_letter:
+            ans_display = num_to_letter[ans_str]
+        elif ans_str.upper() in {"A", "B", "C", "D"}:
+            ans_display = ans_str.upper()
+        else:
+            ans_display = ans_str
+        extras += f"<div class='answer'><b>Answer:</b> {render_inline_math(ans_display)}</div>"
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
