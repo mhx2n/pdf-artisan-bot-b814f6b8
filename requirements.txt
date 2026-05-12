@@ -7,3 +7,4 @@ fonttools==4.54.1
 pydyf==0.10.0
 cffi==1.17.1
 Brotli==1.1.0
+pypdf==5.1.0
