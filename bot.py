@@ -213,11 +213,25 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
 }
 
 THEMES = {
-    "green":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
-    "blue":   {"primary": "#1d4ed8", "accent": "#0284c7", "light": "#eff6ff", "border": "#bfdbfe"},
-    "purple": {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
-    "red":    {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
-    "black":  {"primary": "#111827", "accent": "#374151", "light": "#f9fafb", "border": "#d1d5db"},
+    "emerald":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
+    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
+    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
+    "ocean":    {"primary": "#0369a1", "accent": "#0284c7", "light": "#f0f9ff", "border": "#bae6fd"},
+    "sapphire": {"primary": "#1d4ed8", "accent": "#2563eb", "light": "#eff6ff", "border": "#bfdbfe"},
+    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
+    "indigo":   {"primary": "#4338ca", "accent": "#6366f1", "light": "#eef2ff", "border": "#c7d2fe"},
+    "violet":   {"primary": "#6d28d9", "accent": "#8b5cf6", "light": "#f5f3ff", "border": "#ddd6fe"},
+    "purple":   {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
+    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "pink":     {"primary": "#be185d", "accent": "#db2777", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "rose":     {"primary": "#e11d48", "accent": "#f43f5e", "light": "#fff1f2", "border": "#fecdd3"},
+    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "sunset":   {"primary": "#c2410c", "accent": "#f97316", "light": "#fff7ed", "border": "#fed7aa"},
+    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "slate":    {"primary": "#334155", "accent": "#475569", "light": "#f8fafc", "border": "#cbd5e1"},
+    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
+    "midnight": {"primary": "#0f172a", "accent": "#1e293b", "light": "#f1f5f9", "border": "#cbd5e1"},
+    "amoled":   {"primary": "#000000", "accent": "#1f2937", "light": "#f3f4f6", "border": "#9ca3af"},
 }
 
 COLUMN_ALIASES = {
