@@ -247,6 +247,7 @@ USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 # --- Quiz collection (forward Telegram quizzes → PDF) -----------------------
 USER_QUIZ: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
 QUIZ_STATUS_MSG: Dict[int, Tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
+QUIZ_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 QUIZ_MODE_DEFAULT_ON = True   # any forwarded poll is auto-collected
 
 # --- Force subscription ------------------------------------------------------
