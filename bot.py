@@ -1701,7 +1701,7 @@ def generate_pdf_bytes(
         f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
     )
     body_pdf = HTML(string=html_string, base_url=base_url).write_pdf()
-    return _merge_with_front_back(user_id, body_pdf)
+    return _merge_with_front_back(effective_asset_uid(user_id), body_pdf)
 
 
 async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
