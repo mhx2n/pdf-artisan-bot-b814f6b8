@@ -1430,7 +1430,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     WAITING_FOR.pop(user.id, None)
     await _save_image_upload(context, photo, target)
     if enable_key:
-        get_settings(user.id)[enable_key] = True
+        get_settings(tgt)[enable_key] = True
     _save_state()
     try: await msg.delete()
     except Exception: pass
