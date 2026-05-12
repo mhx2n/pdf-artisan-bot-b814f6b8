@@ -398,6 +398,11 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
         [
+            InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
+            InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
+            InlineKeyboardButton("Quiz Mode", callback_data="quiz:start"),
+        ],
+        [
             InlineKeyboardButton(lbl("reset"), callback_data="reset"),
             InlineKeyboardButton(lbl("generate"), callback_data="generate"),
         ],
