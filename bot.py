@@ -1092,6 +1092,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Admin-only image uploads & toggles
     admin_only_actions = {
         "upload:watermark_image", "upload:logo_image", "upload:thumbnail_image",
+        "upload:front_page", "upload:back_page",
         "toggle:watermark_enabled", "toggle:watermark_image_enabled", "toggle:logo_enabled",
         "toggle:answer_enabled", "toggle:explanation_enabled",
         "set:watermark_text", "set:watermark_opacity",
