@@ -838,9 +838,6 @@ async def handle_role_command(cmd: str, args: str, update: Update, context: Cont
     if cmd == "admins":
         await msg.reply_text(_format_id_list(ADMIN_IDS, "Administrators"), parse_mode=ParseMode.HTML)
         return
-    if cmd == "gens":
-        await msg.reply_text(_format_id_list(GENERATOR_IDS, "Generator Users"), parse_mode=ParseMode.HTML)
-        return
 
     target = _parse_target_id(msg, args)
     if not target:
@@ -864,18 +861,6 @@ async def handle_role_command(cmd: str, args: str, update: Update, context: Cont
             await msg.reply_text(f"✓ Removed administrator <code>{target}</code>.", parse_mode=ParseMode.HTML)
         else:
             await msg.reply_text("That user is not an administrator.")
-    elif cmd == "addgen":
-        if target in ADMIN_IDS:
-            await msg.reply_text("That user is already an administrator.")
-            return
-        GENERATOR_IDS.add(target); _save_state()
-        await msg.reply_text(f"✓ Granted generate-only access to <code>{target}</code>.", parse_mode=ParseMode.HTML)
-    elif cmd == "removegen":
-        if target in GENERATOR_IDS:
-            GENERATOR_IDS.discard(target); _save_state()
-            await msg.reply_text(f"✓ Revoked access for <code>{target}</code>.", parse_mode=ParseMode.HTML)
-        else:
-            await msg.reply_text("That user does not have generator access.")
 
 
 # ---------------------------------------------------------------------------
