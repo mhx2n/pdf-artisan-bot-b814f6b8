@@ -82,6 +82,11 @@ def front_path(uid: int) -> Path:
 def back_path(uid: int) -> Path:
     return DATA_DIR / f"back_{uid}.pdf"
 
+# Sentinel UID for the "User Template" — a dedicated, owner-curated profile
+# used for ALL non-admin users (settings + assets). Owner/admin's own panel
+# changes never affect this profile.
+USER_TEMPLATE_UID: int = -1
+
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
@@ -244,6 +249,9 @@ ADMIN_IDS: Set[int] = set()       # full composer access
 GENERATOR_IDS: Set[int] = set()   # generate-only access
 USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# Owners currently editing the shared User Template profile via the panel.
+EDIT_TEMPLATE: Set[int] = set()
+
 # --- Quiz collection (forward Telegram quizzes → PDF) -----------------------
 USER_QUIZ: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
 QUIZ_STATUS_MSG: Dict[int, Tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
@@ -365,17 +373,35 @@ OWNER_CONTROLLED_KEYS = (
 
 
 def effective_asset_uid(uid: int) -> int:
-    return uid if is_admin(uid) else (OWNER_ID or uid)
+    """Asset bucket used when generating a PDF.
+
+    Admins/owner use their own assets. Regular users always render with the
+    owner-curated User Template assets, so owner/admin tweaks never leak into
+    user-facing PDFs.
+    """
+    return uid if is_admin(uid) else USER_TEMPLATE_UID
 
 
 def effective_settings(uid: int) -> Dict[str, Any]:
     own = get_settings(uid).copy()
-    if is_admin(uid) or not OWNER_ID:
+    if is_admin(uid):
         return own
-    base = get_settings(OWNER_ID)
+    base = get_settings(USER_TEMPLATE_UID)
     for k in OWNER_CONTROLLED_KEYS:
         own[k] = base.get(k, DEFAULT_SETTINGS.get(k))
     return own
+
+
+def panel_target_uid(user_id: int) -> int:
+    """Where panel reads/writes go.
+
+    When the owner toggles 'Edit User Template', every set / toggle / cycle /
+    upload / reset routes to the shared template profile instead of the
+    owner's personal panel.
+    """
+    if is_owner(user_id) and user_id in EDIT_TEMPLATE:
+        return USER_TEMPLATE_UID
+    return user_id
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +432,7 @@ def track(user, action: str) -> None:
     }
 
 
-def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardMarkup:
+def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = False, template_mode: bool = False) -> InlineKeyboardMarkup:
     def flag(key: str) -> str:
         return "ON" if settings.get(key) else "OFF"
 
@@ -460,6 +486,15 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
         InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
         InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
     ])
+    if owner:
+        if template_mode:
+            rows.append([
+                InlineKeyboardButton("✕ Exit User-Template Edit", callback_data="tmpl:exit"),
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton("👥 Edit User Template", callback_data="tmpl:enter"),
+            ])
     rows.append([
         InlineKeyboardButton(lbl("reset"), callback_data="reset"),
         InlineKeyboardButton(lbl("generate"), callback_data="generate"),
@@ -499,11 +534,14 @@ def buttons_editor_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None) -> str:
+def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None,
+               target_uid: Optional[int] = None) -> str:
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
     quiz_count = len(USER_QUIZ.get(user_id, []))
+    asset_uid = target_uid if target_uid is not None else user_id
+    template_mode = (asset_uid == USER_TEMPLATE_UID)
 
     if not is_admin(user_id):
         body = textwrap.dedent(f"""
@@ -527,12 +565,19 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
             body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
         return body
 
-    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
-    logo_mode = "Image" if logo_path(user_id).exists() else "Default"
-    thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
-    front_mode = "Set" if front_path(user_id).exists() else "None"
-    back_mode = "Set" if back_path(user_id).exists() else "None"
-    body = textwrap.dedent(f"""
+    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(asset_uid).exists() else "Text"
+    logo_mode = "Image" if logo_path(asset_uid).exists() else "Default"
+    thumb_mode = "Set" if thumb_path(asset_uid).exists() else "None"
+    front_mode = "Set" if front_path(asset_uid).exists() else "None"
+    back_mode = "Set" if back_path(asset_uid).exists() else "None"
+    scope_line = (
+        "<b>Scope</b>\n  • Editing: <code>USER TEMPLATE</code> "
+        "(applies to every non-admin user)\n\n"
+        if template_mode else
+        "<b>Scope</b>\n  • Editing: <code>Personal panel</code> "
+        "(only affects your own PDFs)\n\n"
+    )
+    body = scope_line + textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
 
@@ -598,6 +643,11 @@ def help_text(user_id: int) -> str:
         <code>/frontpage</code>, <code>/backpage</code> — Upload PDF or image cover
         <code>/removefront</code>, <code>/removeback</code> — Remove cover
 
+        <b>User Template (branding for non-admin users)</b>
+        <code>/usertemplate</code> — Edit the shared profile (logo, watermark, footer, fonts, covers…)
+        <code>/exittemplate</code> — Return to your personal panel
+        <i>Owner / admin panel changes never affect users — only the template does.</i>
+
         <b>Required channels (force-subscribe)</b>
         <code>/channels</code> — Show / manage required channels
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
@@ -662,7 +712,9 @@ async def send_or_update_panel(
     user_id = user.id
     if not is_generator(user_id):
         return
-    settings = get_settings(user_id)
+    tgt = panel_target_uid(user_id)
+    settings = get_settings(tgt)
+    template_mode = (tgt == USER_TEMPLATE_UID)
 
     if waiting_field in {"watermark_image", "logo_image", "thumbnail_image", "front_page", "back_page"}:
         kind_map = {
@@ -673,25 +725,28 @@ async def send_or_update_panel(
             "back_page": ("back cover", "PDF or image"),
         }
         kind, fmt = kind_map[waiting_field]
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting upload</b>\nSend a {fmt} file to use as the {kind}."
         )
         markup = cancel_keyboard()
     elif waiting_field and waiting_field.startswith("btnlabel:"):
         key = waiting_field.split(":", 1)[1]
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting input</b>\nReply with the new label (emoji allowed) for <b>{html.escape(key)}</b>."
         )
         markup = cancel_keyboard()
     elif waiting_field:
         label = FIELD_LABELS.get(waiting_field, waiting_field)
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
         )
         markup = cancel_keyboard()
     else:
-        text = panel_text(user_id, settings, note)
-        markup = main_keyboard(settings, is_admin(user_id)) if is_admin(user_id) else generator_keyboard(settings)
+        text = panel_text(user_id, settings, note, target_uid=tgt)
+        if is_admin(user_id):
+            markup = main_keyboard(settings, True, owner=is_owner(user_id), template_mode=template_mode)
+        else:
+            markup = generator_keyboard(settings)
 
     chat_id = update.effective_chat.id if update.effective_chat else user_id
     panel = PANEL_MSG.get(user_id)
@@ -902,6 +957,7 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "addadmin", "removeadmin",
         "promote", "demote",
         "channels", "addchannel", "removechannel", "setjoinmsg",
+        "usertemplate", "exittemplate",
     }
     alias_map = {
         "promote": "addadmin",
@@ -931,6 +987,20 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await cmd_removechannel(update, context, args)
         elif cmd == "setjoinmsg":
             await cmd_setjoinmsg(update, context, args)
+        elif cmd == "usertemplate":
+            EDIT_TEMPLATE.add(user.id)
+            PANEL_MSG.pop(user.id, None)
+            await send_or_update_panel(
+                update, context,
+                note="Editing the User Template — every change here applies to non-admin users.",
+            )
+        elif cmd == "exittemplate":
+            EDIT_TEMPLATE.discard(user.id)
+            PANEL_MSG.pop(user.id, None)
+            await send_or_update_panel(
+                update, context,
+                note="Back to your personal panel.",
+            )
         else:
             real = alias_map.get(cmd, cmd)
             await handle_role_command(real, args, update, context)
@@ -959,11 +1029,11 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 parse_mode=ParseMode.HTML,
             )
         elif cmd == "removefront":
-            try: front_path(user.id).unlink()
+            try: front_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Front cover removed.")
         elif cmd == "removeback":
-            try: back_path(user.id).unlink()
+            try: back_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Back cover removed.")
         return True
@@ -985,7 +1055,8 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "generate" or cmd == "genquiz":
             await generate_for_user(update, context)
         elif cmd == "reset":
-            USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy(); _save_state()
+            tgt = panel_target_uid(user.id)
+            USER_SETTINGS[tgt] = DEFAULT_SETTINGS.copy(); _save_state()
             await send_or_update_panel(update, context, note="Settings restored to defaults.")
         elif cmd == "status":
             await send_or_update_panel(update, context)
@@ -1059,7 +1130,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             BUTTON_LABELS[key] = value or DEFAULT_BUTTON_LABELS[key]
             note = f"Button '{key}' renamed."
     else:
-        settings = get_settings(user.id)
+        tgt = panel_target_uid(user.id)
+        settings = get_settings(tgt)
         if field == "watermark_opacity":
             try:
                 n = max(0, min(100, int(re.sub(r"\D", "", value) or "0")))
@@ -1124,7 +1196,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not await enforce_subscription(update, context):
         return
 
-    settings = get_settings(user.id)
+    tgt = panel_target_uid(user.id)
+    settings = get_settings(tgt)
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
@@ -1213,8 +1286,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings[field] = pool[(idx + 1) % len(pool)]
         note = f"{field.replace('_', ' ').title()} → {settings[field]}"
     elif data == "reset":
-        USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
+        USER_SETTINGS[tgt] = DEFAULT_SETTINGS.copy()
         note = "Settings restored to defaults."
+    elif data == "tmpl:enter":
+        if not is_owner(user.id):
+            try: await query.answer("Owner only.", show_alert=True)
+            except Exception: pass
+            return
+        EDIT_TEMPLATE.add(user.id)
+        note = "Editing the User Template — changes here apply to every non-admin user."
+    elif data == "tmpl:exit":
+        EDIT_TEMPLATE.discard(user.id)
+        note = "Back to your personal panel. User Template untouched."
     elif data == "cancel":
         WAITING_FOR.pop(user.id, None)
         note = "Cancelled."
@@ -1251,10 +1334,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_image = mime.startswith("image/") or file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
     waiting = WAITING_FOR.get(user.id, "")
+    tgt = panel_target_uid(user.id)
     image_targets = {
-        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(tgt), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(tgt), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(tgt), None, "Thumbnail image saved."),
     }
 
     if waiting in image_targets and is_image:
@@ -1265,7 +1349,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         WAITING_FOR.pop(user.id, None)
         await _save_image_upload(context, doc, target)
         if enable_key:
-            get_settings(user.id)[enable_key] = True
+            get_settings(tgt)[enable_key] = True
         _save_state()
         try: await msg.delete()
         except Exception: pass
@@ -1277,7 +1361,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
             return
-        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        target = front_path(tgt) if waiting == "front_page" else back_path(tgt)
         kind = "front" if waiting == "front_page" else "back"
         WAITING_FOR.pop(user.id, None)
         try:
@@ -1320,10 +1404,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not msg or not user or not is_generator(user.id):
         return
     waiting = WAITING_FOR.get(user.id, "")
+    tgt = panel_target_uid(user.id)
     image_targets = {
-        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(tgt), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(tgt), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(tgt), None, "Thumbnail image saved."),
     }
     photo = msg.photo[-1] if msg.photo else None
     if not photo:
@@ -1334,7 +1419,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
             return
-        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        target = front_path(tgt) if waiting == "front_page" else back_path(tgt)
         kind = "front" if waiting == "front_page" else "back"
         WAITING_FOR.pop(user.id, None)
         try:
@@ -1366,7 +1451,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     WAITING_FOR.pop(user.id, None)
     await _save_image_upload(context, photo, target)
     if enable_key:
-        get_settings(user.id)[enable_key] = True
+        get_settings(tgt)[enable_key] = True
     _save_state()
     try: await msg.delete()
     except Exception: pass
@@ -1594,8 +1679,14 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 <meta charset='utf-8'>
 <title>{html.escape(settings.get('title', 'PDF'))}</title>
 <style>
-  @font-face {{ font-family: 'Noto Sans Bengali'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
-  @import url('https://fonts.googleapis.com/css2?family={en_font_q}:wght@400;600;700;800&family={bn_font_q}:wght@400;600;700&family={math_font_q}:wght@400;700&display=swap');
+  /* Google Fonts (loaded synchronously by WeasyPrint). The chosen Bengali,
+     English and Math families are pulled with a full weight ladder so that
+     500/600/700 actually render — fixing the "fonts look thin and never
+     change" problem. */
+  @import url('https://fonts.googleapis.com/css2?family={en_font_q}:wght@400;500;600;700;800&family={bn_font_q}:wght@400;500;600;700&family={math_font_q}:wght@400;500;600;700&display=swap');
+  /* Local Noto Sans Bengali kept ONLY as a final fallback (loaded last so the
+     chosen Bengali family wins for matching glyphs). */
+  @font-face {{ font-family: 'Noto Sans Bengali Local'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
   @page {{
       size: {size};
       margin: 14mm 12mm 18mm;
@@ -1608,8 +1699,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
       }}
   }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: '{bn_font}', '{en_font}', 'Noto Sans Bengali', 'DejaVu Sans', sans-serif; color: #111827; line-height: 1.55; font-size: 10.5pt; margin: 0; }}
-  .math, sup, sub, .frac {{ font-family: '{math_font}', '{en_font}', 'DejaVu Sans', serif; }}
+  body {{ font-family: '{bn_font}', '{en_font}', 'Noto Sans Bengali Local', 'DejaVu Sans', sans-serif; color: #111827; line-height: 1.55; font-size: 11pt; font-weight: 500; margin: 0; }}
+  .math, sup, sub, .frac {{ font-family: '{math_font}', '{en_font}', 'DejaVu Sans', serif; font-weight: 500; }}
   table {{ border-collapse: collapse; width: 100%; }}
 
   .header {{ width: 100%; border: 1.5px solid {theme['primary']}; border-radius: 8px; background: {theme['light']}; margin-bottom: 12px; }}
@@ -1649,10 +1740,10 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .q-source {{ font-size: 8.5pt; color: {theme['primary']}; font-style: italic; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.2px; }}
 
   table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
-  table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
+  table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; font-weight: 600; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
-  .answer, .explanation {{ margin: 5px 0 0 48px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
+  .answer, .explanation {{ margin: 5px 0 0 48px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; font-weight: 500; break-inside: avoid; }}
 
   .frac {{ display: inline-block; vertical-align: middle; text-align: center; line-height: 1; font-size: 0.9em; }}
   .frac span {{ display: block; }}
