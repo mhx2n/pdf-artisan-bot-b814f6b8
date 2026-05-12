@@ -2362,6 +2362,13 @@ async def start_health_server() -> web.AppRunner:
 
 async def post_init(app: Application) -> None:
     await start_health_server()
+    # Clear any lingering webhook + pending updates so getUpdates can run
+    # cleanly. Eliminates "Conflict: terminated by other getUpdates request"
+    # caused by a stale webhook or queued duplicate updates.
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        logger.debug("delete_webhook on startup failed", exc_info=True)
     logger.info("Bot started successfully")
     marker = DATA_DIR / "restart_target.json"
     if marker.exists():
@@ -2375,6 +2382,22 @@ async def post_init(app: Application) -> None:
         finally:
             try: marker.unlink()
             except Exception: pass
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Swallow transient Telegram/network errors silently; log the rest."""
+    err = context.error
+    name = type(err).__name__ if err else ""
+    msg = str(err) if err else ""
+    transient = (
+        name in {"Conflict", "TimedOut", "NetworkError", "RetryAfter"}
+        or "Timed out" in msg
+        or "getUpdates" in msg
+    )
+    if transient:
+        logger.debug("Transient telegram error suppressed: %s: %s", name, msg)
+        return
+    logger.error("Unhandled error: %s", err, exc_info=err)
 
 
 def main() -> None:
