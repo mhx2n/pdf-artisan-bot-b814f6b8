@@ -74,6 +74,14 @@ def logo_path(uid: int) -> Path:
 def thumb_path(uid: int) -> Path:
     return DATA_DIR / f"thumb_{uid}.jpg"
 
+
+def front_path(uid: int) -> Path:
+    return DATA_DIR / f"front_{uid}.pdf"
+
+
+def back_path(uid: int) -> Path:
+    return DATA_DIR / f"back_{uid}.pdf"
+
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
