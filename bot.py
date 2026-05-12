@@ -2033,6 +2033,17 @@ async def _refresh_quiz_status(context: ContextTypes.DEFAULT_TYPE, uid: int, cha
         except BadRequest as exc:
             if "not modified" in str(exc).lower():
                 return
+            # Old card is gone or unmodifiable — drop it before sending a fresh one.
+            try:
+                await context.bot.delete_message(chat_id=existing[0], message_id=existing[1])
+            except Exception:
+                pass
+    elif existing:
+        # Stored card belongs to another chat — remove it to prevent stale references.
+        try:
+            await context.bot.delete_message(chat_id=existing[0], message_id=existing[1])
+        except Exception:
+            pass
     sent = await context.bot.send_message(
         chat_id=chat_id, text=text, reply_markup=kb,
         parse_mode=ParseMode.HTML, disable_web_page_preview=True,
