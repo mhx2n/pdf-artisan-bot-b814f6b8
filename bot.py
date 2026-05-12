@@ -648,6 +648,7 @@ def help_text(user_id: int) -> str:
         <code>/exittemplate</code> — Return to your personal panel
         <i>Owner / admin panel changes never affect users — only the template does.</i>
 
+        <b>Required channels (force-subscribe)</b>
         <code>/channels</code> — Show / manage required channels
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
         <code>/removechannel &lt;index&gt;</code>
