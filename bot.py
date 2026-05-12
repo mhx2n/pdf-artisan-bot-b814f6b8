@@ -1404,7 +1404,7 @@ async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         bio.name = new_name
 
         thumb = None
-        tpath = thumb_path(user.id)
+        tpath = thumb_path(effective_asset_uid(user.id))
         if tpath.exists():
             thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
