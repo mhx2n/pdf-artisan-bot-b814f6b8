@@ -1721,13 +1721,23 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     if settings.get("answer_enabled") and answer:
         ans_str = str(answer).strip()
         num_to_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}
+        ans_display = ""
         if ans_str in num_to_letter:
             ans_display = num_to_letter[ans_str]
         elif ans_str.upper() in {"A", "B", "C", "D"}:
             ans_display = ans_str.upper()
         else:
-            ans_display = ans_str
-        extras += f"<div class='answer'><b>Answer:</b> {render_inline_math(ans_display)}</div>"
+            # Try to match the answer text against the four options to derive
+            # the correct letter (A/B/C/D). We never print the raw text.
+            target = " ".join(ans_str.lower().split())
+            letters = ["A", "B", "C", "D"]
+            for i, key in enumerate(("option_a", "option_b", "option_c", "option_d")):
+                opt = " ".join(str(row.get(key, "")).lower().split())
+                if opt and (opt == target or opt in target or target in opt):
+                    ans_display = letters[i]
+                    break
+        if ans_display:
+            extras += f"<div class='answer'><b>Answer:</b> {ans_display}</div>"
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
