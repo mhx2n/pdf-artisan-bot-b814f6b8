@@ -493,6 +493,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
       • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
       • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
       • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
+      • Fonts — BN: <code>{html.escape(str(settings.get('bn_font', '—')))}</code> · EN: <code>{html.escape(str(settings.get('en_font', '—')))}</code> · Math: <code>{html.escape(str(settings.get('math_font', '—')))}</code>
 
     <b>Source</b>
       • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
