@@ -180,6 +180,9 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
     "columns": "Columns",
     "page_size": "Page",
     "theme": "Theme",
+    "bn_font": "Bangla Font",
+    "en_font": "English Font",
+    "math_font": "Math Font",
     "reset": "Reset",
     "generate": "Generate PDF",
 }
