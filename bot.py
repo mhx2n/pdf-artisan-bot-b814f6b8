@@ -373,17 +373,35 @@ OWNER_CONTROLLED_KEYS = (
 
 
 def effective_asset_uid(uid: int) -> int:
-    return uid if is_admin(uid) else (OWNER_ID or uid)
+    """Asset bucket used when generating a PDF.
+
+    Admins/owner use their own assets. Regular users always render with the
+    owner-curated User Template assets, so owner/admin tweaks never leak into
+    user-facing PDFs.
+    """
+    return uid if is_admin(uid) else USER_TEMPLATE_UID
 
 
 def effective_settings(uid: int) -> Dict[str, Any]:
     own = get_settings(uid).copy()
-    if is_admin(uid) or not OWNER_ID:
+    if is_admin(uid):
         return own
-    base = get_settings(OWNER_ID)
+    base = get_settings(USER_TEMPLATE_UID)
     for k in OWNER_CONTROLLED_KEYS:
         own[k] = base.get(k, DEFAULT_SETTINGS.get(k))
     return own
+
+
+def panel_target_uid(user_id: int) -> int:
+    """Where panel reads/writes go.
+
+    When the owner toggles 'Edit User Template', every set / toggle / cycle /
+    upload / reset routes to the shared template profile instead of the
+    owner's personal panel.
+    """
+    if is_owner(user_id) and user_id in EDIT_TEMPLATE:
+        return USER_TEMPLATE_UID
+    return user_id
 
 
 # ---------------------------------------------------------------------------
