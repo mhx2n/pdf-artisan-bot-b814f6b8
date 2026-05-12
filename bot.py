@@ -1264,8 +1264,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings[field] = pool[(idx + 1) % len(pool)]
         note = f"{field.replace('_', ' ').title()} → {settings[field]}"
     elif data == "reset":
-        USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
+        USER_SETTINGS[tgt] = DEFAULT_SETTINGS.copy()
         note = "Settings restored to defaults."
+    elif data == "tmpl:enter":
+        if not is_owner(user.id):
+            try: await query.answer("Owner only.", show_alert=True)
+            except Exception: pass
+            return
+        EDIT_TEMPLATE.add(user.id)
+        note = "Editing the User Template — changes here apply to every non-admin user."
+    elif data == "tmpl:exit":
+        EDIT_TEMPLATE.discard(user.id)
+        note = "Back to your personal panel. User Template untouched."
     elif data == "cancel":
         WAITING_FOR.pop(user.id, None)
         note = "Cancelled."
