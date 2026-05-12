@@ -564,10 +564,17 @@ async def send_or_update_panel(
         return
     settings = get_settings(user_id)
 
-    if waiting_field in {"watermark_image", "logo_image", "thumbnail_image"}:
-        kind = {"watermark_image": "watermark", "logo_image": "logo", "thumbnail_image": "thumbnail"}[waiting_field]
+    if waiting_field in {"watermark_image", "logo_image", "thumbnail_image", "front_page", "back_page"}:
+        kind_map = {
+            "watermark_image": ("watermark image", "PNG or JPG"),
+            "logo_image": ("logo image", "PNG or JPG"),
+            "thumbnail_image": ("thumbnail image", "PNG or JPG"),
+            "front_page": ("front cover", "PDF or image"),
+            "back_page": ("back cover", "PDF or image"),
+        }
+        kind, fmt = kind_map[waiting_field]
         text = panel_text(user_id, settings, note) + (
-            f"\n\n<b>Awaiting upload</b>\nSend a PNG or JPG image to use as {kind}."
+            f"\n\n<b>Awaiting upload</b>\nSend a {fmt} file to use as the {kind}."
         )
         markup = cancel_keyboard()
     elif waiting_field and waiting_field.startswith("btnlabel:"):
