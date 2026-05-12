@@ -213,25 +213,52 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
 }
 
 THEMES = {
+    # ── Basic 7 (real, classic, professional) ──────────────────────────────
     "emerald":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
-    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
-    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
     "ocean":    {"primary": "#0369a1", "accent": "#0284c7", "light": "#f0f9ff", "border": "#bae6fd"},
     "sapphire": {"primary": "#1d4ed8", "accent": "#2563eb", "light": "#eff6ff", "border": "#bfdbfe"},
-    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
     "indigo":   {"primary": "#4338ca", "accent": "#6366f1", "light": "#eef2ff", "border": "#c7d2fe"},
+    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
+    # ── Greens / nature ────────────────────────────────────────────────────
+    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
+    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
+    "lime":     {"primary": "#3f6212", "accent": "#65a30d", "light": "#f7fee7", "border": "#d9f99d"},
+    "sage":     {"primary": "#4d7c0f", "accent": "#84cc16", "light": "#f7fee7", "border": "#bef264"},
+    # ── Blues ──────────────────────────────────────────────────────────────
+    "sky":      {"primary": "#0284c7", "accent": "#38bdf8", "light": "#f0f9ff", "border": "#bae6fd"},
+    "azure":    {"primary": "#1e40af", "accent": "#3b82f6", "light": "#eff6ff", "border": "#bfdbfe"},
+    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
+    "teal":     {"primary": "#115e59", "accent": "#0d9488", "light": "#f0fdfa", "border": "#5eead4"},
+    # ── Purples / violets ──────────────────────────────────────────────────
     "violet":   {"primary": "#6d28d9", "accent": "#8b5cf6", "light": "#f5f3ff", "border": "#ddd6fe"},
     "purple":   {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
-    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "lavender": {"primary": "#7c3aed", "accent": "#a78bfa", "light": "#f5f3ff", "border": "#ddd6fe"},
+    "grape":    {"primary": "#581c87", "accent": "#7e22ce", "light": "#faf5ff", "border": "#e9d5ff"},
+    # ── Pinks / cute ───────────────────────────────────────────────────────
     "pink":     {"primary": "#be185d", "accent": "#db2777", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "bubblegum":{"primary": "#db2777", "accent": "#f472b6", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "blossom":  {"primary": "#e11d48", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
     "rose":     {"primary": "#e11d48", "accent": "#f43f5e", "light": "#fff1f2", "border": "#fecdd3"},
-    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "candy":    {"primary": "#c026d3", "accent": "#e879f9", "light": "#fdf4ff", "border": "#f5d0fe"},
+    # ── Warm / sunset ──────────────────────────────────────────────────────
+    "coral":    {"primary": "#e11d48", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
+    "peach":    {"primary": "#ea580c", "accent": "#fb923c", "light": "#fff7ed", "border": "#fed7aa"},
     "sunset":   {"primary": "#c2410c", "accent": "#f97316", "light": "#fff7ed", "border": "#fed7aa"},
-    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "tangerine":{"primary": "#c2410c", "accent": "#fb923c", "light": "#fff7ed", "border": "#fed7aa"},
+    "honey":    {"primary": "#a16207", "accent": "#eab308", "light": "#fefce8", "border": "#fef08a"},
+    # ── Neutrals / dark / pro ──────────────────────────────────────────────
     "slate":    {"primary": "#334155", "accent": "#475569", "light": "#f8fafc", "border": "#cbd5e1"},
-    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
     "midnight": {"primary": "#0f172a", "accent": "#1e293b", "light": "#f1f5f9", "border": "#cbd5e1"},
     "amoled":   {"primary": "#000000", "accent": "#1f2937", "light": "#f3f4f6", "border": "#9ca3af"},
+    "mocha":    {"primary": "#78350f", "accent": "#b45309", "light": "#fffbeb", "border": "#fde68a"},
+    # ── Cute pastels ───────────────────────────────────────────────────────
+    "cotton":   {"primary": "#9333ea", "accent": "#c084fc", "light": "#faf5ff", "border": "#e9d5ff"},
+    "sorbet":   {"primary": "#f43f5e", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
+    "macaron":  {"primary": "#0d9488", "accent": "#5eead4", "light": "#f0fdfa", "border": "#99f6e4"},
+    "marshmallow":{"primary": "#7c3aed", "accent": "#c4b5fd", "light": "#f5f3ff", "border": "#ddd6fe"},
 }
 
 COLUMN_ALIASES = {
