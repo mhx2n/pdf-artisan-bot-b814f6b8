@@ -339,15 +339,41 @@ def is_admin(uid: Optional[int]) -> bool:
 
 
 def is_generator(uid: Optional[int]) -> bool:
-    """Has at least generate-only access."""
-    return is_admin(uid) or (uid is not None and uid in GENERATOR_IDS)
+    """Basic access — open to anyone (subject to force-subscribe gate)."""
+    return uid is not None
 
 
 def role_label(uid: int) -> str:
     if is_owner(uid): return "Owner"
     if uid in ADMIN_IDS: return "Administrator"
-    if uid in GENERATOR_IDS: return "Generator"
-    return "Guest"
+    return "User"
+
+
+# ---- Asset / settings inheritance ----
+# Non-admin users use the OWNER's assets and presentation settings so the
+# branding is uniform. They only control the document-level fields exposed
+# in the compact panel (title, subtitle, set, marks, time, columns, theme,
+# explanation toggle).
+OWNER_CONTROLLED_KEYS = (
+    "footer_text", "footer_link",
+    "watermark_enabled", "watermark_text", "watermark_opacity",
+    "watermark_image_enabled", "logo_enabled", "answer_enabled",
+    "page_size", "bn_font", "en_font", "math_font",
+)
+
+
+def effective_asset_uid(uid: int) -> int:
+    return uid if is_admin(uid) else (OWNER_ID or uid)
+
+
+def effective_settings(uid: int) -> Dict[str, Any]:
+    own = get_settings(uid).copy()
+    if is_admin(uid) or not OWNER_ID:
+        return own
+    base = get_settings(OWNER_ID)
+    for k in OWNER_CONTROLLED_KEYS:
+        own[k] = base.get(k, DEFAULT_SETTINGS.get(k))
+    return own
 
 
 # ---------------------------------------------------------------------------
