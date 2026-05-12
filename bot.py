@@ -1873,8 +1873,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   td.q-text {{ padding-left: 12px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
   .q-source {{ font-size: 8.5pt; color: {theme['primary']}; font-style: italic; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.2px; }}
 
-  table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
-  table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; font-weight: 600; }}
+  table.options {{ table-layout: fixed; margin: 6px 0 0 0; width: 100%; }}
+  table.options td.option {{ width: 50%; padding: 3px 8px 3px 0; vertical-align: top; word-wrap: break-word; font-weight: 600; text-align: left; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
   .answer, .explanation {{ margin: 6px 0 0 0; padding: 6px 10px; border-left: 3px solid {theme['accent']}; background: {theme['light']}; font-size: 9.5pt; font-weight: 500; border-radius: 0 4px 4px 0; break-inside: avoid; text-align: left; }}
