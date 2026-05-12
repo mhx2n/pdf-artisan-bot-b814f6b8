@@ -2109,14 +2109,15 @@ async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         "explanation": explanation,
         "source": source or "",
     }
-    USER_QUIZ[user.id].append(record)
-    _save_state()
-    track(user, "quiz captured")
+    async with QUIZ_LOCKS[user.id]:
+        USER_QUIZ[user.id].append(record)
+        _save_state()
+        track(user, "quiz captured")
 
-    try: await msg.delete()
-    except Exception: pass
+        try: await msg.delete()
+        except Exception: pass
 
-    await _refresh_quiz_status(context, user.id, msg.chat_id)
+        await _refresh_quiz_status(context, user.id, msg.chat_id)
 
 
 async def cmd_quizclear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
