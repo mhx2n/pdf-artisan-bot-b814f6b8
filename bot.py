@@ -1176,6 +1176,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "cycle:theme":
         keys = list(THEMES.keys())
         settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
+    elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
+        if not is_admin(user.id):
+            try: await query.answer("Administrator only.", show_alert=True)
+            except Exception: pass
+            return
+        field = data.split(":", 1)[1]
+        pool = {"bn_font": BN_FONTS, "en_font": EN_FONTS, "math_font": MATH_FONTS}[field]
+        cur = settings.get(field, pool[0])
+        idx = pool.index(cur) if cur in pool else -1
+        settings[field] = pool[(idx + 1) % len(pool)]
+        note = f"{field.replace('_', ' ').title()} → {settings[field]}"
     elif data == "reset":
         USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
         note = "Settings restored to defaults."
