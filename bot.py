@@ -1452,7 +1452,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
-            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings)
+            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings, user.id)
             stop_flag["v"] = True
             anim_task.cancel()
             try: await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
@@ -1464,8 +1464,9 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
             thumb = None
-            if THUMB_IMG_PATH.exists():
-                thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+            tpath = thumb_path(user.id)
+            if tpath.exists():
+                thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
             await context.bot.send_document(
                 chat_id=chat_id,
