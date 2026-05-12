@@ -1962,7 +1962,12 @@ async def cmd_setjoinmsg(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
         return
     text = args.strip()
     if not text:
-        await msg.reply_text("Provide caption text after the command.")
+        await msg.reply_text(
+            "Provide caption text after the command. HTML is allowed.\n"
+            "Use the placeholder <code>{user_id}</code> to insert the user's "
+            "Telegram ID into the message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
     FORCE_CAPTION = text
     _save_state()
