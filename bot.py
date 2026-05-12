@@ -2149,6 +2149,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
 
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
