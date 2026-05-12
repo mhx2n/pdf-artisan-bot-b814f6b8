@@ -222,6 +222,20 @@ ADMIN_IDS: Set[int] = set()       # full composer access
 GENERATOR_IDS: Set[int] = set()   # generate-only access
 USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# --- Quiz collection (forward Telegram quizzes → PDF) -----------------------
+USER_QUIZ: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+QUIZ_STATUS_MSG: Dict[int, Tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
+QUIZ_MODE_DEFAULT_ON = True   # any forwarded poll is auto-collected
+
+# --- Force subscription ------------------------------------------------------
+# Each entry: {"chat": "@channel" or -100xxxx, "title": str, "link": str, "button": str}
+FORCE_CHANNELS: List[Dict[str, str]] = []
+FORCE_CAPTION: str = (
+    "<b>Membership required</b>\n\n"
+    "To use this service, please join the channel(s) below and then tap "
+    "<b>I have joined</b> to verify your access."
+)
+
 
 def _save_state() -> None:
     try:
