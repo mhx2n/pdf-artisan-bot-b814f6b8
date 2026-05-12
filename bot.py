@@ -466,14 +466,16 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
 
 
 def generator_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
-    """Compact panel for generate-only users."""
+    """Compact panel for general users (basic, document-level controls only)."""
+    expl_state = "ON" if settings.get("explanation_enabled") else "OFF"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(lbl("title"), callback_data="set:title"),
          InlineKeyboardButton(lbl("subtitle"), callback_data="set:subtitle")],
         [InlineKeyboardButton(lbl("set_name"), callback_data="set:set_name"),
          InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
          InlineKeyboardButton(lbl("time"), callback_data="set:time")],
-        [InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+        [InlineKeyboardButton(f"{lbl('explanation_enabled')}: {expl_state}", callback_data="toggle:explanation_enabled"),
+         InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
          InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme")],
         [InlineKeyboardButton(lbl("reset"), callback_data="reset"),
          InlineKeyboardButton(lbl("generate"), callback_data="generate")],
