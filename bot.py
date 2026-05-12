@@ -1405,6 +1405,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
       box-sizing: border-box;
   }}
   td.q-text {{ padding-left: 12px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
+  .q-source {{ font-size: 8.5pt; color: {theme['primary']}; font-style: italic; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.2px; }}
 
   table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
   table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
