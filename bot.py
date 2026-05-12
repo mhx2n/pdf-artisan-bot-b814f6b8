@@ -1691,7 +1691,7 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
 
 
 def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
-    theme = THEMES.get(settings.get("theme"), THEMES["green"])
+    theme = THEMES.get(settings.get("theme"), THEMES["emerald"])
     col_mode = settings.get("columns", 2)
     columns = col_count(col_mode)
     readable = is_readable_mode(col_mode)
