@@ -445,23 +445,23 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
             InlineKeyboardButton(f"{lbl('page_size')}: {settings['page_size']}", callback_data="cycle:page_size"),
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
-        [
+    ]
+    if owner_view:
+        rows.append([
             InlineKeyboardButton(f"BN: {settings.get('bn_font', 'Noto Sans Bengali')}", callback_data="cycle:bn_font"),
             InlineKeyboardButton(f"EN: {settings.get('en_font', 'Inter')}", callback_data="cycle:en_font"),
-        ],
-        [
+        ])
+        rows.append([
             InlineKeyboardButton(f"Math: {settings.get('math_font', 'STIX Two Math')}", callback_data="cycle:math_font"),
-        ],
-        [
-            InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
-            InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
-            InlineKeyboardButton("Quiz Mode", callback_data="quiz:start"),
-        ],
-        [
-            InlineKeyboardButton(lbl("reset"), callback_data="reset"),
-            InlineKeyboardButton(lbl("generate"), callback_data="generate"),
-        ],
-    ]
+        ])
+    rows.append([
+        InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
+        InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
+    ])
+    rows.append([
+        InlineKeyboardButton(lbl("reset"), callback_data="reset"),
+        InlineKeyboardButton(lbl("generate"), callback_data="generate"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
