@@ -1009,8 +1009,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     track(user, f"btn:{query.data}")
-    settings = get_settings(user.id)
     data = query.data or ""
+
+    # Force-subscribe verification button — always allowed.
+    if data == "fsub:check":
+        pending = await missing_subscriptions(context, user.id)
+        if not pending:
+            try:
+                await query.edit_message_text(
+                    "<b>Membership verified.</b> You can continue using the bot.",
+                    parse_mode=ParseMode.HTML,
+                )
+            except BadRequest: pass
+            return
+        try:
+            await query.answer("You have not joined all required channels yet.", show_alert=True)
+            await query.edit_message_reply_markup(reply_markup=_join_keyboard(pending))
+        except BadRequest: pass
+        return
+
+    # Quiz status card buttons
+    if data == "quiz:gen":
+        await generate_for_user(update, context)
+        return
+    if data == "quiz:clear":
+        USER_QUIZ.pop(user.id, None); _save_state()
+        await _refresh_quiz_status(context, user.id, query.message.chat_id)
+        return
+
+    # Gate the rest of the panel for non-owners.
+    if not await enforce_subscription(update, context):
+        return
+
+    settings = get_settings(user.id)
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
