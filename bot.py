@@ -91,12 +91,32 @@ LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
 
+# Transient network/polling errors from python-telegram-bot that the library
+# auto-recovers from. Suppressed from the visible error log so the dashboard
+# stays clean and only shows actionable failures.
+_TRANSIENT_ERROR_MARKERS = (
+    "Conflict: terminated by other getUpdates",
+    "telegram.error.Conflict",
+    "telegram.error.TimedOut",
+    "telegram.error.NetworkError",
+    "httpx.ReadError",
+    "httpx.ConnectError",
+    "httpx.RemoteProtocolError",
+    "httpx.ReadTimeout",
+    "httpx.ConnectTimeout",
+    "httpx.PoolTimeout",
+    "Timed out",
+)
+
+
 class BufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             line = self.format(record)
             LOG_BUFFER.append(line)
             if record.levelno >= logging.ERROR:
+                if any(m in line for m in _TRANSIENT_ERROR_MARKERS):
+                    return
                 ERROR_BUFFER.append((time.time(), line))
         except Exception:
             pass
