@@ -301,6 +301,8 @@ FORCE_CAPTION: str = (
     "tap <b>I have joined</b> to verify your access.\n\n"
     "Your Telegram ID: <code>{user_id}</code>"
 )
+
+
 def col_label(v: Any) -> str:
     if v == "L" or str(v).upper() == "L":
         return "Readable"
