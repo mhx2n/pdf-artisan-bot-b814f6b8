@@ -1247,7 +1247,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
-    # Front / back cover upload (admin only)
+    # Front / back cover upload (admin only) — accepts PDF or image documents
     if waiting in {"front_page", "back_page"}:
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
@@ -1263,7 +1263,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         try: await msg.delete()
         except Exception: pass
-        await msg.chat.send_message(f"✓ {note}")
+        await send_or_update_panel(update, context, note=note)
         return
 
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
