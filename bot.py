@@ -1433,7 +1433,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _save_image_upload(context, doc_or_photo, target: Path) -> None:
     file_id = doc_or_photo.file_id
     tg_file = await context.bot.get_file(file_id)
-    await tg_file.download_to_drive(custom_path=str(target))
+    raw = bytes(await tg_file.download_as_bytearray())
+    # Telegram document thumbnails MUST be JPEG, ≤320x320, ≤200KB.
+    # Normalise any thumbnail upload so it always renders in chat.
+    if target.name.startswith("thumb_"):
+        try:
+            from PIL import Image
+            im = Image.open(io.BytesIO(raw))
+            if im.mode in ("RGBA", "LA", "P"):
+                bg = Image.new("RGB", im.size, (255, 255, 255))
+                im = im.convert("RGBA")
+                bg.paste(im, mask=im.split()[-1])
+                im = bg
+            else:
+                im = im.convert("RGB")
+            im.thumbnail((320, 320), Image.LANCZOS)
+            quality = 85
+            while True:
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=quality, optimize=True)
+                if buf.tell() <= 190 * 1024 or quality <= 40:
+                    break
+                quality -= 10
+            target.write_bytes(buf.getvalue())
+            return
+        except Exception:
+            logger.exception("Thumbnail normalisation failed; saving raw bytes")
+    target.write_bytes(raw)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1612,8 +1638,11 @@ async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYP
 
         thumb = None
         tpath = thumb_path(effective_asset_uid(user.id))
-        if tpath.exists():
-            thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
+        if tpath.exists() and tpath.stat().st_size > 0:
+            try:
+                thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
+            except Exception:
+                thumb = None
 
         await context.bot.send_document(
             chat_id=msg.chat_id,
@@ -2021,8 +2050,11 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio.name = filename
             thumb = None
             tpath = thumb_path(effective_asset_uid(user.id))
-            if tpath.exists():
-                thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
+            if tpath.exists() and tpath.stat().st_size > 0:
+                try:
+                    thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
+                except Exception:
+                    thumb = None
 
             await context.bot.send_document(
                 chat_id=chat_id,
