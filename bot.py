@@ -534,11 +534,14 @@ def buttons_editor_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None) -> str:
+def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = None,
+               target_uid: Optional[int] = None) -> str:
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
     quiz_count = len(USER_QUIZ.get(user_id, []))
+    asset_uid = target_uid if target_uid is not None else user_id
+    template_mode = (asset_uid == USER_TEMPLATE_UID)
 
     if not is_admin(user_id):
         body = textwrap.dedent(f"""
@@ -562,12 +565,19 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
             body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
         return body
 
-    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
-    logo_mode = "Image" if logo_path(user_id).exists() else "Default"
-    thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
-    front_mode = "Set" if front_path(user_id).exists() else "None"
-    back_mode = "Set" if back_path(user_id).exists() else "None"
-    body = textwrap.dedent(f"""
+    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(asset_uid).exists() else "Text"
+    logo_mode = "Image" if logo_path(asset_uid).exists() else "Default"
+    thumb_mode = "Set" if thumb_path(asset_uid).exists() else "None"
+    front_mode = "Set" if front_path(asset_uid).exists() else "None"
+    back_mode = "Set" if back_path(asset_uid).exists() else "None"
+    scope_line = (
+        "<b>Scope</b>\n  • Editing: <code>USER TEMPLATE</code> "
+        "(applies to every non-admin user)\n\n"
+        if template_mode else
+        "<b>Scope</b>\n  • Editing: <code>Personal panel</code> "
+        "(only affects your own PDFs)\n\n"
+    )
+    body = scope_line + textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
 
