@@ -246,6 +246,9 @@ def _save_state() -> None:
             "user_csv": {str(k): base64.b64encode(v).decode() for k, v in USER_CSV.items()},
             "admins": list(ADMIN_IDS),
             "generators": list(GENERATOR_IDS),
+            "user_quiz": {str(k): v for k, v in USER_QUIZ.items() if v},
+            "force_channels": FORCE_CHANNELS,
+            "force_caption": FORCE_CAPTION,
         }
         STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
@@ -253,6 +256,7 @@ def _save_state() -> None:
 
 
 def _load_state() -> None:
+    global FORCE_CAPTION
     if not STATE_PATH.exists():
         return
     try:
@@ -277,6 +281,23 @@ def _load_state() -> None:
         for uid in payload.get("generators") or []:
             try: GENERATOR_IDS.add(int(uid))
             except Exception: pass
+        for k, v in (payload.get("user_quiz") or {}).items():
+            try: USER_QUIZ[int(k)] = list(v) if isinstance(v, list) else []
+            except Exception: pass
+        fc = payload.get("force_channels")
+        if isinstance(fc, list):
+            FORCE_CHANNELS.clear()
+            for entry in fc:
+                if isinstance(entry, dict) and entry.get("chat"):
+                    FORCE_CHANNELS.append({
+                        "chat": str(entry.get("chat", "")),
+                        "title": str(entry.get("title", "Channel")),
+                        "link": str(entry.get("link", "")),
+                        "button": str(entry.get("button", "Join Channel")),
+                    })
+        cap = payload.get("force_caption")
+        if isinstance(cap, str) and cap.strip():
+            FORCE_CAPTION = cap
         logger.info("State restored from %s", STATE_PATH)
     except Exception:
         logger.exception("Failed to load state")
