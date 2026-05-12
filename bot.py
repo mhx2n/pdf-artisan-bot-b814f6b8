@@ -57,9 +57,22 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_PATH = DATA_DIR / "state.json"
 LOG_PATH = DATA_DIR / "bot.log"
+# Legacy global paths kept only for backward-compatible migration.
 WATERMARK_IMG_PATH = DATA_DIR / "watermark_image.png"
 LOGO_IMG_PATH = DATA_DIR / "logo_image.png"
 THUMB_IMG_PATH = DATA_DIR / "thumbnail_image.jpg"
+
+
+def wm_path(uid: int) -> Path:
+    return DATA_DIR / f"watermark_{uid}.png"
+
+
+def logo_path(uid: int) -> Path:
+    return DATA_DIR / f"logo_{uid}.png"
+
+
+def thumb_path(uid: int) -> Path:
+    return DATA_DIR / f"thumb_{uid}.jpg"
 
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
