@@ -1263,12 +1263,14 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     """
 
 
-def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
+def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
     theme = THEMES.get(settings.get("theme"), THEMES["green"])
     columns = 2 if int(settings.get("columns", 2)) == 2 else 1
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
-    use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and WATERMARK_IMG_PATH.exists()
+    u_wm = wm_path(user_id)
+    u_logo = logo_path(user_id)
+    use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
     use_text_wm = bool(settings.get("watermark_enabled")) and not use_image_wm
     watermark_text = html.escape(settings.get("watermark_text", "")) if use_text_wm else ""
     questions = "\n".join(question_html(row, i + 1, settings) for i, row in enumerate(rows))
@@ -1280,7 +1282,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     if use_image_wm:
         wm_html = (
             f"<div class='watermark-img'>"
-            f"<img src='{WATERMARK_IMG_PATH.name}' alt='' style='opacity:{opacity};'/>"
+            f"<img src='{u_wm.name}' alt='' style='opacity:{opacity};'/>"
             f"</div>"
         )
     elif use_text_wm and watermark_text:
@@ -1288,10 +1290,10 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 
     # Header logo: image if uploaded, otherwise the "PDF" badge.
     if settings.get("logo_enabled"):
-        if LOGO_IMG_PATH.exists():
+        if u_logo.exists():
             logo_html = (
                 "<td class='logo'>"
-                f"<div class='logo-circle'><img src='{LOGO_IMG_PATH.name}' alt='logo'/></div>"
+                f"<div class='logo-circle'><img src='{u_logo.name}' alt='logo'/></div>"
                 "</td>"
             )
         else:
