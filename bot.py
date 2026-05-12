@@ -911,16 +911,12 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Owner-only
     owner_cmds = {
         "buttons", "logs", "restart",
-        "admins", "gens", "users",
+        "admins", "users",
         "addadmin", "removeadmin",
-        "addgen", "removegen",
-        "allow", "deny", "promote", "demote",
+        "promote", "demote",
         "channels", "addchannel", "removechannel", "setjoinmsg",
     }
     alias_map = {
-        "users": "users",
-        "allow": "addgen",
-        "deny": "removegen",
         "promote": "addadmin",
         "demote": "removeadmin",
     }
@@ -938,12 +934,8 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "restart":
             await cmd_restart(update, context)
         elif cmd == "users":
-            text = (
-                _format_id_list(ADMIN_IDS, "Administrators")
-                + "\n\n"
-                + _format_id_list(GENERATOR_IDS, "Generator Users")
-            )
-            await msg.reply_text(text, parse_mode=ParseMode.HTML)
+            await msg.reply_text(_format_id_list(ADMIN_IDS, "Administrators"),
+                                 parse_mode=ParseMode.HTML)
         elif cmd == "channels":
             await cmd_channels(update, context)
         elif cmd == "addchannel":
