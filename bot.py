@@ -1009,11 +1009,11 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 parse_mode=ParseMode.HTML,
             )
         elif cmd == "removefront":
-            try: front_path(user.id).unlink()
+            try: front_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Front cover removed.")
         elif cmd == "removeback":
-            try: back_path(user.id).unlink()
+            try: back_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Back cover removed.")
         return True
