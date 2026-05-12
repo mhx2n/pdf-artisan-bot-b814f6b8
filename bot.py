@@ -1041,8 +1041,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         USER_QUIZ.pop(user.id, None); _save_state()
         await _refresh_quiz_status(context, user.id, query.message.chat_id)
         return
-
-    # Gate the rest of the panel for non-owners.
+    if data == "quiz:start":
+        await _refresh_quiz_status(context, user.id, query.message.chat_id)
+        return
     if not await enforce_subscription(update, context):
         return
 
