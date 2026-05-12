@@ -1383,10 +1383,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not msg or not user or not is_generator(user.id):
         return
     waiting = WAITING_FOR.get(user.id, "")
+    tgt = panel_target_uid(user.id)
     image_targets = {
-        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(tgt), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(tgt), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(tgt), None, "Thumbnail image saved."),
     }
     photo = msg.photo[-1] if msg.photo else None
     if not photo:
@@ -1397,7 +1398,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
             return
-        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        target = front_path(tgt) if waiting == "front_page" else back_path(tgt)
         kind = "front" if waiting == "front_page" else "back"
         WAITING_FOR.pop(user.id, None)
         try:
