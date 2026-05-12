@@ -575,13 +575,10 @@ def help_text(user_id: int) -> str:
         <code>/clear</code> — Remove the loaded CSV
 
         <b>Access management</b>
-        <code>/users</code> — List all administrators &amp; generators
+        <code>/users</code> — List all administrators
         <code>/admins</code> — List administrators
         <code>/addadmin &lt;id&gt;</code> (alias <code>/promote</code>) — Promote a user to administrator
         <code>/removeadmin &lt;id&gt;</code> (alias <code>/demote</code>) — Revoke administrator access
-        <code>/gens</code> — List generator users
-        <code>/addgen &lt;id&gt;</code> (alias <code>/allow</code>) — Grant generate-only access
-        <code>/removegen &lt;id&gt;</code> (alias <code>/deny</code>) — Revoke generate-only access
 
         <b>Customisation &amp; ops</b>
         <code>/buttons</code> — Customise button labels
@@ -603,7 +600,7 @@ def help_text(user_id: int) -> str:
         <code>/channels</code> — Show / manage required channels
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
         <code>/removechannel &lt;index&gt;</code>
-        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption
+        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption (use <code>{user_id}</code> placeholder)
 
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
@@ -620,21 +617,9 @@ def help_text(user_id: int) -> str:
         <code>/reset</code> — Restore defaults
         <code>/status</code> — Current configuration
         <code>/clear</code> — Remove the loaded CSV
-        <code>/help</code> — Show this message
-
-        <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
-
-        <i>All commands also accept the </i><code>.</code><i> prefix.</i>
-        """).strip()
-
-    if is_generator(user_id):
-        return textwrap.dedent("""
-        <b>Available Commands</b>
-
-        <code>/start</code> — Open the generator panel
-        <code>/generate</code> — Build the PDF from your CSV
-        <code>/reset</code> — Restore defaults
-        <code>/clear</code> — Remove the loaded CSV
+        <code>/quiz</code>, <code>/quizclear</code>, <code>/genquiz</code> — Quiz collector
+        <code>/frontpage</code>, <code>/backpage</code> — Upload cover
+        <code>/removefront</code>, <code>/removeback</code> — Remove cover
         <code>/help</code> — Show this message
 
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
@@ -643,10 +628,19 @@ def help_text(user_id: int) -> str:
         """).strip()
 
     return textwrap.dedent("""
-    <b>Restricted Service</b>
+    <b>Available Commands</b>
 
-    This is a private utility. Please contact the administrator to request
-    access. Provide your numeric Telegram ID when requesting permission.
+    <code>/start</code> — Open the panel
+    <code>/generate</code> — Build the PDF from your CSV or quiz pool
+    <code>/reset</code> — Restore defaults
+    <code>/clear</code> — Remove the loaded CSV
+    <code>/quiz</code>, <code>/quizclear</code>, <code>/genquiz</code> — Quiz collector
+    <code>/help</code> — Show this message
+
+    <b>Tip</b> — Forward any Telegram quiz poll to add it to your collection.
+    Reply to a generated PDF with a new name to rename it.
+
+    <i>All commands also accept the </i><code>.</code><i> prefix.</i>
     """).strip()
 
 
