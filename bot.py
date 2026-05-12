@@ -1488,6 +1488,12 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     columns = 2 if int(settings.get("columns", 2)) == 2 else 1
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
+    bn_font = settings.get("bn_font", "Noto Sans Bengali")
+    en_font = settings.get("en_font", "Inter")
+    math_font = settings.get("math_font", "STIX Two Math")
+    bn_font_q = bn_font.replace(" ", "+")
+    en_font_q = en_font.replace(" ", "+")
+    math_font_q = math_font.replace(" ", "+")
     u_wm = wm_path(user_id)
     u_logo = logo_path(user_id)
     use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
