@@ -501,6 +501,22 @@ def help_text(user_id: int) -> str:
         <code>/restart</code> — Restart the bot (state preserved)
         <code>/help</code> — Show this message
 
+        <b>Quiz → PDF</b>
+        <code>/quiz</code> — Open the quiz collector card
+        <code>/quizclear</code> — Clear collected quiz polls
+        <code>/genquiz</code> — Generate PDF from collected polls
+        <i>(Forwarding any quiz poll auto-collects it.)</i>
+
+        <b>Front / Back covers</b>
+        <code>/frontpage</code>, <code>/backpage</code> — Upload PDF or image cover
+        <code>/removefront</code>, <code>/removeback</code> — Remove cover
+
+        <b>Required channels (force-subscribe)</b>
+        <code>/channels</code> — Show / manage required channels
+        <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
+        <code>/removechannel &lt;index&gt;</code>
+        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption
+
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
         <i>All commands also accept the </i><code>.</code><i> prefix.</i>
