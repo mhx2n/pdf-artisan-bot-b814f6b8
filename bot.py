@@ -952,6 +952,7 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "addadmin", "removeadmin",
         "promote", "demote",
         "channels", "addchannel", "removechannel", "setjoinmsg",
+        "usertemplate", "exittemplate",
     }
     alias_map = {
         "promote": "addadmin",
