@@ -1174,7 +1174,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not await enforce_subscription(update, context):
         return
 
-    settings = get_settings(user.id)
+    tgt = panel_target_uid(user.id)
+    settings = get_settings(tgt)
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
