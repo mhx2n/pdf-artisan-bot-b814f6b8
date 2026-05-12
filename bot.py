@@ -1009,15 +1009,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not user or not msg:
         return
-    if not is_generator(user.id):
-        await msg.reply_text(
-            "Welcome.\n\nThis is a private CSV → PDF utility. "
-            "Access is limited to authorised users.\n\n"
-            f"Your Telegram ID: <code>{user.id}</code>\n"
-            "Please share this ID with the administrator to request access.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+    # Force-subscribe gate runs first; the gate caption is fully customisable
+    # by the owner and may include the {user_id} placeholder.
     if not await enforce_subscription(update, context):
         return
     PANEL_MSG.pop(user.id, None)
