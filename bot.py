@@ -138,7 +138,26 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "columns": 2,
     "page_size": "A4",
     "theme": "green",
+    "bn_font": "Noto Sans Bengali",
+    "en_font": "Inter",
+    "math_font": "STIX Two Math",
 }
+
+# Curated, professional Google Fonts. WeasyPrint will fetch via @import.
+BN_FONTS = [
+    "Noto Sans Bengali", "Hind Siliguri", "Baloo Da 2", "Tiro Bangla",
+    "Atma", "Mina", "Galada", "Anek Bangla", "Noto Serif Bengali",
+]
+EN_FONTS = [
+    "Inter", "Poppins", "Roboto", "Montserrat", "Lato", "Open Sans",
+    "Nunito", "Work Sans", "Manrope", "Source Sans 3", "Merriweather",
+    "Playfair Display", "Raleway", "Rubik", "DM Sans", "Mulish",
+]
+MATH_FONTS = [
+    "STIX Two Math", "STIX Two Text", "Lora", "Source Serif 4",
+    "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Roboto Mono",
+    "Cambay", "Spectral",
+]
 
 DEFAULT_BUTTON_LABELS: Dict[str, str] = {
     "title": "Title",
