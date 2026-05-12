@@ -253,9 +253,10 @@ QUIZ_MODE_DEFAULT_ON = True   # any forwarded poll is auto-collected
 # Each entry: {"chat": "@channel" or -100xxxx, "title": str, "link": str, "button": str}
 FORCE_CHANNELS: List[Dict[str, str]] = []
 FORCE_CAPTION: str = (
-    "<b>Membership required</b>\n\n"
-    "To use this service, please join the channel(s) below and then tap "
-    "<b>I have joined</b> to verify your access."
+    "<b>Welcome</b>\n\n"
+    "To use this bot, please join the required channel(s) below and then "
+    "tap <b>I have joined</b> to verify your access.\n\n"
+    "Your Telegram ID: <code>{user_id}</code>"
 )
 
 
