@@ -1692,7 +1692,10 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
 
 def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
     theme = THEMES.get(settings.get("theme"), THEMES["green"])
-    columns = 2 if int(settings.get("columns", 2)) == 2 else 1
+    col_mode = settings.get("columns", 2)
+    columns = col_count(col_mode)
+    readable = is_readable_mode(col_mode)
+    body_class = "readable" if readable else "compact"
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
     bn_font = settings.get("bn_font", "Noto Sans Bengali")
