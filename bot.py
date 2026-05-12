@@ -91,12 +91,32 @@ LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
 
+# Transient network/polling errors from python-telegram-bot that the library
+# auto-recovers from. Suppressed from the visible error log so the dashboard
+# stays clean and only shows actionable failures.
+_TRANSIENT_ERROR_MARKERS = (
+    "Conflict: terminated by other getUpdates",
+    "telegram.error.Conflict",
+    "telegram.error.TimedOut",
+    "telegram.error.NetworkError",
+    "httpx.ReadError",
+    "httpx.ConnectError",
+    "httpx.RemoteProtocolError",
+    "httpx.ReadTimeout",
+    "httpx.ConnectTimeout",
+    "httpx.PoolTimeout",
+    "Timed out",
+)
+
+
 class BufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             line = self.format(record)
             LOG_BUFFER.append(line)
             if record.levelno >= logging.ERROR:
+                if any(m in line for m in _TRANSIENT_ERROR_MARKERS):
+                    return
                 ERROR_BUFFER.append((time.time(), line))
         except Exception:
             pass
@@ -2342,6 +2362,13 @@ async def start_health_server() -> web.AppRunner:
 
 async def post_init(app: Application) -> None:
     await start_health_server()
+    # Clear any lingering webhook + pending updates so getUpdates can run
+    # cleanly. Eliminates "Conflict: terminated by other getUpdates request"
+    # caused by a stale webhook or queued duplicate updates.
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        logger.debug("delete_webhook on startup failed", exc_info=True)
     logger.info("Bot started successfully")
     marker = DATA_DIR / "restart_target.json"
     if marker.exists():
@@ -2355,6 +2382,22 @@ async def post_init(app: Application) -> None:
         finally:
             try: marker.unlink()
             except Exception: pass
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Swallow transient Telegram/network errors silently; log the rest."""
+    err = context.error
+    name = type(err).__name__ if err else ""
+    msg = str(err) if err else ""
+    transient = (
+        name in {"Conflict", "TimedOut", "NetworkError", "RetryAfter"}
+        or "Timed out" in msg
+        or "getUpdates" in msg
+    )
+    if transient:
+        logger.debug("Transient telegram error suppressed: %s: %s", name, msg)
+        return
+    logger.error("Unhandled error: %s", err, exc_info=err)
 
 
 def main() -> None:
@@ -2392,8 +2435,20 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
+    app.add_error_handler(on_error)
 
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    # Quiet noisy library loggers — PTB auto-recovers from these and we already
+    # surface meaningful failures via on_error / BufferHandler.
+    for noisy in ("telegram.ext.Updater", "telegram.ext.ExtBot",
+                  "telegram.request", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        poll_interval=1.0,
+        timeout=30,
+    )
 
 
 if __name__ == "__main__":
