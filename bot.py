@@ -1035,7 +1035,8 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "generate" or cmd == "genquiz":
             await generate_for_user(update, context)
         elif cmd == "reset":
-            USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy(); _save_state()
+            tgt = panel_target_uid(user.id)
+            USER_SETTINGS[tgt] = DEFAULT_SETTINGS.copy(); _save_state()
             await send_or_update_panel(update, context, note="Settings restored to defaults.")
         elif cmd == "status":
             await send_or_update_panel(update, context)
