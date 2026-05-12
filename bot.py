@@ -2435,8 +2435,20 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
+    app.add_error_handler(on_error)
 
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    # Quiet noisy library loggers — PTB auto-recovers from these and we already
+    # surface meaningful failures via on_error / BufferHandler.
+    for noisy in ("telegram.ext.Updater", "telegram.ext.ExtBot",
+                  "telegram.request", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        poll_interval=1.0,
+        timeout=30,
+    )
 
 
 if __name__ == "__main__":
