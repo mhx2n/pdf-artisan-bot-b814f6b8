@@ -57,9 +57,22 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_PATH = DATA_DIR / "state.json"
 LOG_PATH = DATA_DIR / "bot.log"
+# Legacy global paths kept only for backward-compatible migration.
 WATERMARK_IMG_PATH = DATA_DIR / "watermark_image.png"
 LOGO_IMG_PATH = DATA_DIR / "logo_image.png"
 THUMB_IMG_PATH = DATA_DIR / "thumbnail_image.jpg"
+
+
+def wm_path(uid: int) -> Path:
+    return DATA_DIR / f"watermark_{uid}.png"
+
+
+def logo_path(uid: int) -> Path:
+    return DATA_DIR / f"logo_{uid}.png"
+
+
+def thumb_path(uid: int) -> Path:
+    return DATA_DIR / f"thumb_{uid}.jpg"
 
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
@@ -383,9 +396,9 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
-    wm_mode = "Image" if settings.get("watermark_image_enabled") and WATERMARK_IMG_PATH.exists() else "Text"
-    logo_mode = "Image" if LOGO_IMG_PATH.exists() else "Default"
-    thumb_mode = "Set" if THUMB_IMG_PATH.exists() else "None"
+    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
+    logo_mode = "Image" if logo_path(user_id).exists() else "Default"
+    thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
@@ -1018,9 +1031,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     waiting = WAITING_FOR.get(user.id, "")
     image_targets = {
-        "watermark_image": (WATERMARK_IMG_PATH, "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (LOGO_IMG_PATH, "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (THUMB_IMG_PATH, None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
     }
 
     if waiting in image_targets and is_image:
@@ -1062,9 +1075,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     waiting = WAITING_FOR.get(user.id, "")
     image_targets = {
-        "watermark_image": (WATERMARK_IMG_PATH, "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (LOGO_IMG_PATH, "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (THUMB_IMG_PATH, None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
     }
     if waiting not in image_targets:
         return
@@ -1117,8 +1130,9 @@ async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         bio.name = new_name
 
         thumb = None
-        if THUMB_IMG_PATH.exists():
-            thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+        tpath = thumb_path(user.id)
+        if tpath.exists():
+            thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
         await context.bot.send_document(
             chat_id=msg.chat_id,
@@ -1249,12 +1263,14 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     """
 
 
-def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
+def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
     theme = THEMES.get(settings.get("theme"), THEMES["green"])
     columns = 2 if int(settings.get("columns", 2)) == 2 else 1
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
-    use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and WATERMARK_IMG_PATH.exists()
+    u_wm = wm_path(user_id)
+    u_logo = logo_path(user_id)
+    use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
     use_text_wm = bool(settings.get("watermark_enabled")) and not use_image_wm
     watermark_text = html.escape(settings.get("watermark_text", "")) if use_text_wm else ""
     questions = "\n".join(question_html(row, i + 1, settings) for i, row in enumerate(rows))
@@ -1266,7 +1282,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
     if use_image_wm:
         wm_html = (
             f"<div class='watermark-img'>"
-            f"<img src='{WATERMARK_IMG_PATH.name}' alt='' style='opacity:{opacity};'/>"
+            f"<img src='{u_wm.name}' alt='' style='opacity:{opacity};'/>"
             f"</div>"
         )
     elif use_text_wm and watermark_text:
@@ -1274,10 +1290,10 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 
     # Header logo: image if uploaded, otherwise the "PDF" badge.
     if settings.get("logo_enabled"):
-        if LOGO_IMG_PATH.exists():
+        if u_logo.exists():
             logo_html = (
                 "<td class='logo'>"
-                f"<div class='logo-circle'><img src='{LOGO_IMG_PATH.name}' alt='logo'/></div>"
+                f"<div class='logo-circle'><img src='{u_logo.name}' alt='logo'/></div>"
                 "</td>"
             )
         else:
@@ -1329,24 +1345,24 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
   .question {{ break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; margin-bottom: 9px; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
-  td.q-no {{ width: 30px; vertical-align: top; padding: 0; }}
+  td.q-no {{ width: 40px; vertical-align: top; padding: 0 8px 0 0; }}
   .q-circle {{
       display: inline-block;
-      min-width: 22px; height: 22px;
-      line-height: 22px; padding: 0 6px;
+      min-width: 26px; height: 22px;
+      line-height: 22px; padding: 0 7px;
       border-radius: 11px;
       background: {theme['primary']}; color: #fff;
       text-align: center; font-weight: 700; font-size: 9.5pt;
       font-family: 'DejaVu Sans', sans-serif;
       box-sizing: border-box;
   }}
-  td.q-text {{ padding-left: 8px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
+  td.q-text {{ padding-left: 12px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
 
-  table.options {{ table-layout: fixed; margin: 4px 0 0 32px; width: calc(100% - 32px); }}
+  table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
   table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
-  .answer, .explanation {{ margin: 5px 0 0 32px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
+  .answer, .explanation {{ margin: 5px 0 0 48px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; break-inside: avoid; }}
 
   .frac {{ display: inline-block; vertical-align: middle; text-align: center; line-height: 1; font-size: 0.9em; }}
   .frac span {{ display: block; }}
@@ -1379,9 +1395,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any]) -> str:
 </html>"""
 
 
-def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any]) -> bytes:
+def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any], user_id: int) -> bytes:
     rows = parse_csv(csv_data)
-    html_string = build_html(rows, settings)
+    html_string = build_html(rows, settings, user_id)
     base_url = str(DATA_DIR)
     html_string = html_string.replace(
         "url('fonts/NotoSansBengali-Regular.ttf')",
@@ -1436,7 +1452,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
-            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings)
+            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings, user.id)
             stop_flag["v"] = True
             anim_task.cancel()
             try: await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
@@ -1448,8 +1464,9 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
             thumb = None
-            if THUMB_IMG_PATH.exists():
-                thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+            tpath = thumb_path(user.id)
+            if tpath.exists():
+                thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
             await context.bot.send_document(
                 chat_id=chat_id,
