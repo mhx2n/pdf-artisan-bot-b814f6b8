@@ -396,9 +396,9 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
-    wm_mode = "Image" if settings.get("watermark_image_enabled") and WATERMARK_IMG_PATH.exists() else "Text"
-    logo_mode = "Image" if LOGO_IMG_PATH.exists() else "Default"
-    thumb_mode = "Set" if THUMB_IMG_PATH.exists() else "None"
+    wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
+    logo_mode = "Image" if logo_path(user_id).exists() else "Default"
+    thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
