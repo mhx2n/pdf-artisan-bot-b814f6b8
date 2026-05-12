@@ -247,15 +247,17 @@ USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 # --- Quiz collection (forward Telegram quizzes → PDF) -----------------------
 USER_QUIZ: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
 QUIZ_STATUS_MSG: Dict[int, Tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
+QUIZ_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 QUIZ_MODE_DEFAULT_ON = True   # any forwarded poll is auto-collected
 
 # --- Force subscription ------------------------------------------------------
 # Each entry: {"chat": "@channel" or -100xxxx, "title": str, "link": str, "button": str}
 FORCE_CHANNELS: List[Dict[str, str]] = []
 FORCE_CAPTION: str = (
-    "<b>Membership required</b>\n\n"
-    "To use this service, please join the channel(s) below and then tap "
-    "<b>I have joined</b> to verify your access."
+    "<b>Welcome</b>\n\n"
+    "To use this bot, please join the required channel(s) below and then "
+    "tap <b>I have joined</b> to verify your access.\n\n"
+    "Your Telegram ID: <code>{user_id}</code>"
 )
 
 
@@ -339,15 +341,41 @@ def is_admin(uid: Optional[int]) -> bool:
 
 
 def is_generator(uid: Optional[int]) -> bool:
-    """Has at least generate-only access."""
-    return is_admin(uid) or (uid is not None and uid in GENERATOR_IDS)
+    """Basic access — open to anyone (subject to force-subscribe gate)."""
+    return uid is not None
 
 
 def role_label(uid: int) -> str:
     if is_owner(uid): return "Owner"
     if uid in ADMIN_IDS: return "Administrator"
-    if uid in GENERATOR_IDS: return "Generator"
-    return "Guest"
+    return "User"
+
+
+# ---- Asset / settings inheritance ----
+# Non-admin users use the OWNER's assets and presentation settings so the
+# branding is uniform. They only control the document-level fields exposed
+# in the compact panel (title, subtitle, set, marks, time, columns, theme,
+# explanation toggle).
+OWNER_CONTROLLED_KEYS = (
+    "footer_text", "footer_link",
+    "watermark_enabled", "watermark_text", "watermark_opacity",
+    "watermark_image_enabled", "logo_enabled", "answer_enabled",
+    "page_size", "bn_font", "en_font", "math_font",
+)
+
+
+def effective_asset_uid(uid: int) -> int:
+    return uid if is_admin(uid) else (OWNER_ID or uid)
+
+
+def effective_settings(uid: int) -> Dict[str, Any]:
+    own = get_settings(uid).copy()
+    if is_admin(uid) or not OWNER_ID:
+        return own
+    base = get_settings(OWNER_ID)
+    for k in OWNER_CONTROLLED_KEYS:
+        own[k] = base.get(k, DEFAULT_SETTINGS.get(k))
+    return own
 
 
 # ---------------------------------------------------------------------------
@@ -419,35 +447,37 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
             InlineKeyboardButton(f"{lbl('page_size')}: {settings['page_size']}", callback_data="cycle:page_size"),
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
-        [
+    ]
+    if owner_view:
+        rows.append([
             InlineKeyboardButton(f"BN: {settings.get('bn_font', 'Noto Sans Bengali')}", callback_data="cycle:bn_font"),
             InlineKeyboardButton(f"EN: {settings.get('en_font', 'Inter')}", callback_data="cycle:en_font"),
-        ],
-        [
+        ])
+        rows.append([
             InlineKeyboardButton(f"Math: {settings.get('math_font', 'STIX Two Math')}", callback_data="cycle:math_font"),
-        ],
-        [
-            InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
-            InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
-            InlineKeyboardButton("Quiz Mode", callback_data="quiz:start"),
-        ],
-        [
-            InlineKeyboardButton(lbl("reset"), callback_data="reset"),
-            InlineKeyboardButton(lbl("generate"), callback_data="generate"),
-        ],
-    ]
+        ])
+    rows.append([
+        InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
+        InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
+    ])
+    rows.append([
+        InlineKeyboardButton(lbl("reset"), callback_data="reset"),
+        InlineKeyboardButton(lbl("generate"), callback_data="generate"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
 def generator_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
-    """Compact panel for generate-only users."""
+    """Compact panel for general users (basic, document-level controls only)."""
+    expl_state = "ON" if settings.get("explanation_enabled") else "OFF"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(lbl("title"), callback_data="set:title"),
          InlineKeyboardButton(lbl("subtitle"), callback_data="set:subtitle")],
         [InlineKeyboardButton(lbl("set_name"), callback_data="set:set_name"),
          InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
          InlineKeyboardButton(lbl("time"), callback_data="set:time")],
-        [InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+        [InlineKeyboardButton(f"{lbl('explanation_enabled')}: {expl_state}", callback_data="toggle:explanation_enabled"),
+         InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
          InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme")],
         [InlineKeyboardButton(lbl("reset"), callback_data="reset"),
          InlineKeyboardButton(lbl("generate"), callback_data="generate")],
@@ -473,12 +503,35 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
+    quiz_count = len(USER_QUIZ.get(user_id, []))
+
+    if not is_admin(user_id):
+        body = textwrap.dedent(f"""
+        <b>PDF Composer</b>
+        <i>Role: {role}</i>
+
+        <b>Document</b>
+          • Title: <code>{html.escape(str(settings['title']))}</code>
+          • Subtitle: <code>{html.escape(str(settings['subtitle']))}</code>
+          • Set / Marks / Time: <code>{html.escape(str(settings['set_name']))}</code> · <code>{html.escape(str(settings['marks']))}</code> · <code>{html.escape(str(settings['time']))}</code>
+
+        <b>Layout</b>
+          • Columns: <code>{settings['columns']}</code> · Theme: <code>{settings['theme'].title()}</code>
+          • Explanation: <code>{'On' if settings.get('explanation_enabled') else 'Off'}</code>
+
+        <b>Source</b>
+          • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
+          • Quiz pool: <code>{quiz_count}</code> question(s)
+        """).strip()
+        if note:
+            body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
+        return body
+
     wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
     logo_mode = "Image" if logo_path(user_id).exists() else "Default"
     thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
     front_mode = "Set" if front_path(user_id).exists() else "None"
     back_mode = "Set" if back_path(user_id).exists() else "None"
-    quiz_count = len(USER_QUIZ.get(user_id, []))
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
@@ -524,13 +577,10 @@ def help_text(user_id: int) -> str:
         <code>/clear</code> — Remove the loaded CSV
 
         <b>Access management</b>
-        <code>/users</code> — List all administrators &amp; generators
+        <code>/users</code> — List all administrators
         <code>/admins</code> — List administrators
         <code>/addadmin &lt;id&gt;</code> (alias <code>/promote</code>) — Promote a user to administrator
         <code>/removeadmin &lt;id&gt;</code> (alias <code>/demote</code>) — Revoke administrator access
-        <code>/gens</code> — List generator users
-        <code>/addgen &lt;id&gt;</code> (alias <code>/allow</code>) — Grant generate-only access
-        <code>/removegen &lt;id&gt;</code> (alias <code>/deny</code>) — Revoke generate-only access
 
         <b>Customisation &amp; ops</b>
         <code>/buttons</code> — Customise button labels
@@ -552,7 +602,7 @@ def help_text(user_id: int) -> str:
         <code>/channels</code> — Show / manage required channels
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
         <code>/removechannel &lt;index&gt;</code>
-        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption
+        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption (use <code>{user_id}</code> placeholder)
 
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
@@ -569,21 +619,9 @@ def help_text(user_id: int) -> str:
         <code>/reset</code> — Restore defaults
         <code>/status</code> — Current configuration
         <code>/clear</code> — Remove the loaded CSV
-        <code>/help</code> — Show this message
-
-        <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
-
-        <i>All commands also accept the </i><code>.</code><i> prefix.</i>
-        """).strip()
-
-    if is_generator(user_id):
-        return textwrap.dedent("""
-        <b>Available Commands</b>
-
-        <code>/start</code> — Open the generator panel
-        <code>/generate</code> — Build the PDF from your CSV
-        <code>/reset</code> — Restore defaults
-        <code>/clear</code> — Remove the loaded CSV
+        <code>/quiz</code>, <code>/quizclear</code>, <code>/genquiz</code> — Quiz collector
+        <code>/frontpage</code>, <code>/backpage</code> — Upload cover
+        <code>/removefront</code>, <code>/removeback</code> — Remove cover
         <code>/help</code> — Show this message
 
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
@@ -592,10 +630,19 @@ def help_text(user_id: int) -> str:
         """).strip()
 
     return textwrap.dedent("""
-    <b>Restricted Service</b>
+    <b>Available Commands</b>
 
-    This is a private utility. Please contact the administrator to request
-    access. Provide your numeric Telegram ID when requesting permission.
+    <code>/start</code> — Open the panel
+    <code>/generate</code> — Build the PDF from your CSV or quiz pool
+    <code>/reset</code> — Restore defaults
+    <code>/clear</code> — Remove the loaded CSV
+    <code>/quiz</code>, <code>/quizclear</code>, <code>/genquiz</code> — Quiz collector
+    <code>/help</code> — Show this message
+
+    <b>Tip</b> — Forward any Telegram quiz poll to add it to your collection.
+    Reply to a generated PDF with a new name to rename it.
+
+    <i>All commands also accept the </i><code>.</code><i> prefix.</i>
     """).strip()
 
 
@@ -793,9 +840,6 @@ async def handle_role_command(cmd: str, args: str, update: Update, context: Cont
     if cmd == "admins":
         await msg.reply_text(_format_id_list(ADMIN_IDS, "Administrators"), parse_mode=ParseMode.HTML)
         return
-    if cmd == "gens":
-        await msg.reply_text(_format_id_list(GENERATOR_IDS, "Generator Users"), parse_mode=ParseMode.HTML)
-        return
 
     target = _parse_target_id(msg, args)
     if not target:
@@ -819,18 +863,6 @@ async def handle_role_command(cmd: str, args: str, update: Update, context: Cont
             await msg.reply_text(f"✓ Removed administrator <code>{target}</code>.", parse_mode=ParseMode.HTML)
         else:
             await msg.reply_text("That user is not an administrator.")
-    elif cmd == "addgen":
-        if target in ADMIN_IDS:
-            await msg.reply_text("That user is already an administrator.")
-            return
-        GENERATOR_IDS.add(target); _save_state()
-        await msg.reply_text(f"✓ Granted generate-only access to <code>{target}</code>.", parse_mode=ParseMode.HTML)
-    elif cmd == "removegen":
-        if target in GENERATOR_IDS:
-            GENERATOR_IDS.discard(target); _save_state()
-            await msg.reply_text(f"✓ Revoked access for <code>{target}</code>.", parse_mode=ParseMode.HTML)
-        else:
-            await msg.reply_text("That user does not have generator access.")
 
 
 # ---------------------------------------------------------------------------
@@ -866,16 +898,12 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Owner-only
     owner_cmds = {
         "buttons", "logs", "restart",
-        "admins", "gens", "users",
+        "admins", "users",
         "addadmin", "removeadmin",
-        "addgen", "removegen",
-        "allow", "deny", "promote", "demote",
+        "promote", "demote",
         "channels", "addchannel", "removechannel", "setjoinmsg",
     }
     alias_map = {
-        "users": "users",
-        "allow": "addgen",
-        "deny": "removegen",
         "promote": "addadmin",
         "demote": "removeadmin",
     }
@@ -893,12 +921,8 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "restart":
             await cmd_restart(update, context)
         elif cmd == "users":
-            text = (
-                _format_id_list(ADMIN_IDS, "Administrators")
-                + "\n\n"
-                + _format_id_list(GENERATOR_IDS, "Generator Users")
-            )
-            await msg.reply_text(text, parse_mode=ParseMode.HTML)
+            await msg.reply_text(_format_id_list(ADMIN_IDS, "Administrators"),
+                                 parse_mode=ParseMode.HTML)
         elif cmd == "channels":
             await cmd_channels(update, context)
         elif cmd == "addchannel":
@@ -987,15 +1011,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not user or not msg:
         return
-    if not is_generator(user.id):
-        await msg.reply_text(
-            "Welcome.\n\nThis is a private CSV → PDF utility. "
-            "Access is limited to authorised users.\n\n"
-            f"Your Telegram ID: <code>{user.id}</code>\n"
-            "Please share this ID with the administrator to request access.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+    # Force-subscribe gate runs first; the gate caption is fully customisable
+    # by the owner and may include the {user_id} placeholder.
     if not await enforce_subscription(update, context):
         return
     PANEL_MSG.pop(user.id, None)
@@ -1150,12 +1167,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except Exception: pass
             return
 
-    # Admin-only image uploads & toggles
+    # Admin-only image uploads & toggles (presentation/branding fields)
     admin_only_actions = {
         "upload:watermark_image", "upload:logo_image", "upload:thumbnail_image",
         "upload:front_page", "upload:back_page",
         "toggle:watermark_enabled", "toggle:watermark_image_enabled", "toggle:logo_enabled",
-        "toggle:answer_enabled", "toggle:explanation_enabled",
+        "toggle:answer_enabled",
         "set:watermark_text", "set:watermark_opacity",
         "set:footer_text", "set:footer_link",
         "cycle:page_size",
@@ -1185,8 +1202,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keys = list(THEMES.keys())
         settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
     elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
-        if not is_admin(user.id):
-            try: await query.answer("Administrator only.", show_alert=True)
+        if not is_owner(user.id):
+            try: await query.answer("Owner only.", show_alert=True)
             except Exception: pass
             return
         field = data.split(":", 1)[1]
@@ -1388,7 +1405,7 @@ async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         bio.name = new_name
 
         thumb = None
-        tpath = thumb_path(user.id)
+        tpath = thumb_path(effective_asset_uid(user.id))
         if tpath.exists():
             thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
@@ -1537,8 +1554,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     bn_font_q = bn_font.replace(" ", "+")
     en_font_q = en_font.replace(" ", "+")
     math_font_q = math_font.replace(" ", "+")
-    u_wm = wm_path(user_id)
-    u_logo = logo_path(user_id)
+    asset_uid = effective_asset_uid(user_id)
+    u_wm = wm_path(asset_uid)
+    u_logo = logo_path(asset_uid)
     use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
     use_text_wm = bool(settings.get("watermark_enabled")) and not use_image_wm
     watermark_text = html.escape(settings.get("watermark_text", "")) if use_text_wm else ""
@@ -1684,7 +1702,7 @@ def generate_pdf_bytes(
         f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
     )
     body_pdf = HTML(string=html_string, base_url=base_url).write_pdf()
-    return _merge_with_front_back(user_id, body_pdf)
+    return _merge_with_front_back(effective_asset_uid(user_id), body_pdf)
 
 
 async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1707,7 +1725,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    settings = get_settings(user.id).copy()
+    settings = effective_settings(user.id)
     chat_id = msg.chat.id
     track(user, "generating PDF")
 
@@ -1757,7 +1775,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
             thumb = None
-            tpath = thumb_path(user.id)
+            tpath = thumb_path(effective_asset_uid(user.id))
             if tpath.exists():
                 thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
@@ -1838,7 +1856,7 @@ async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
     pending = await missing_subscriptions(context, user.id)
     if not pending:
         return True
-    text = FORCE_CAPTION
+    text = FORCE_CAPTION.replace("{user_id}", str(user.id))
     markup = _join_keyboard(pending)
     try:
         if update.callback_query:
@@ -1946,7 +1964,12 @@ async def cmd_setjoinmsg(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
         return
     text = args.strip()
     if not text:
-        await msg.reply_text("Provide caption text after the command.")
+        await msg.reply_text(
+            "Provide caption text after the command. HTML is allowed.\n"
+            "Use the placeholder <code>{user_id}</code> to insert the user's "
+            "Telegram ID into the message.",
+            parse_mode=ParseMode.HTML,
+        )
         return
     FORCE_CAPTION = text
     _save_state()
@@ -2011,6 +2034,17 @@ async def _refresh_quiz_status(context: ContextTypes.DEFAULT_TYPE, uid: int, cha
         except BadRequest as exc:
             if "not modified" in str(exc).lower():
                 return
+            # Old card is gone or unmodifiable — drop it before sending a fresh one.
+            try:
+                await context.bot.delete_message(chat_id=existing[0], message_id=existing[1])
+            except Exception:
+                pass
+    elif existing:
+        # Stored card belongs to another chat — remove it to prevent stale references.
+        try:
+            await context.bot.delete_message(chat_id=existing[0], message_id=existing[1])
+        except Exception:
+            pass
     sent = await context.bot.send_message(
         chat_id=chat_id, text=text, reply_markup=kb,
         parse_mode=ParseMode.HTML, disable_web_page_preview=True,
@@ -2075,14 +2109,15 @@ async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         "explanation": explanation,
         "source": source or "",
     }
-    USER_QUIZ[user.id].append(record)
-    _save_state()
-    track(user, "quiz captured")
+    async with QUIZ_LOCKS[user.id]:
+        USER_QUIZ[user.id].append(record)
+        _save_state()
+        track(user, "quiz captured")
 
-    try: await msg.delete()
-    except Exception: pass
+        try: await msg.delete()
+        except Exception: pass
 
-    await _refresh_quiz_status(context, user.id, msg.chat_id)
+        await _refresh_quiz_status(context, user.id, msg.chat_id)
 
 
 async def cmd_quizclear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
