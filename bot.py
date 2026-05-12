@@ -1674,8 +1674,14 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 <meta charset='utf-8'>
 <title>{html.escape(settings.get('title', 'PDF'))}</title>
 <style>
-  @font-face {{ font-family: 'Noto Sans Bengali'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
-  @import url('https://fonts.googleapis.com/css2?family={en_font_q}:wght@400;600;700;800&family={bn_font_q}:wght@400;600;700&family={math_font_q}:wght@400;700&display=swap');
+  /* Google Fonts (loaded synchronously by WeasyPrint). The chosen Bengali,
+     English and Math families are pulled with a full weight ladder so that
+     500/600/700 actually render — fixing the "fonts look thin and never
+     change" problem. */
+  @import url('https://fonts.googleapis.com/css2?family={en_font_q}:wght@400;500;600;700;800&family={bn_font_q}:wght@400;500;600;700&family={math_font_q}:wght@400;500;600;700&display=swap');
+  /* Local Noto Sans Bengali kept ONLY as a final fallback (loaded last so the
+     chosen Bengali family wins for matching glyphs). */
+  @font-face {{ font-family: 'Noto Sans Bengali Local'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
   @page {{
       size: {size};
       margin: 14mm 12mm 18mm;
@@ -1688,8 +1694,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
       }}
   }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: '{bn_font}', '{en_font}', 'Noto Sans Bengali', 'DejaVu Sans', sans-serif; color: #111827; line-height: 1.55; font-size: 10.5pt; margin: 0; }}
-  .math, sup, sub, .frac {{ font-family: '{math_font}', '{en_font}', 'DejaVu Sans', serif; }}
+  body {{ font-family: '{bn_font}', '{en_font}', 'Noto Sans Bengali Local', 'DejaVu Sans', sans-serif; color: #111827; line-height: 1.55; font-size: 11pt; font-weight: 500; margin: 0; }}
+  .math, sup, sub, .frac {{ font-family: '{math_font}', '{en_font}', 'DejaVu Sans', serif; font-weight: 500; }}
   table {{ border-collapse: collapse; width: 100%; }}
 
   .header {{ width: 100%; border: 1.5px solid {theme['primary']}; border-radius: 8px; background: {theme['light']}; margin-bottom: 12px; }}
