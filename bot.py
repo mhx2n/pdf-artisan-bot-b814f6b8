@@ -162,7 +162,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "explanation_enabled": True,
     "columns": 2,
     "page_size": "A4",
-    "theme": "green",
+    "theme": "emerald",
     "bn_font": "Noto Sans Bengali",
     "en_font": "Inter",
     "math_font": "STIX Two Math",
@@ -213,11 +213,25 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
 }
 
 THEMES = {
-    "green":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
-    "blue":   {"primary": "#1d4ed8", "accent": "#0284c7", "light": "#eff6ff", "border": "#bfdbfe"},
-    "purple": {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
-    "red":    {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
-    "black":  {"primary": "#111827", "accent": "#374151", "light": "#f9fafb", "border": "#d1d5db"},
+    "emerald":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
+    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
+    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
+    "ocean":    {"primary": "#0369a1", "accent": "#0284c7", "light": "#f0f9ff", "border": "#bae6fd"},
+    "sapphire": {"primary": "#1d4ed8", "accent": "#2563eb", "light": "#eff6ff", "border": "#bfdbfe"},
+    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
+    "indigo":   {"primary": "#4338ca", "accent": "#6366f1", "light": "#eef2ff", "border": "#c7d2fe"},
+    "violet":   {"primary": "#6d28d9", "accent": "#8b5cf6", "light": "#f5f3ff", "border": "#ddd6fe"},
+    "purple":   {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
+    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "pink":     {"primary": "#be185d", "accent": "#db2777", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "rose":     {"primary": "#e11d48", "accent": "#f43f5e", "light": "#fff1f2", "border": "#fecdd3"},
+    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "sunset":   {"primary": "#c2410c", "accent": "#f97316", "light": "#fff7ed", "border": "#fed7aa"},
+    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "slate":    {"primary": "#334155", "accent": "#475569", "light": "#f8fafc", "border": "#cbd5e1"},
+    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
+    "midnight": {"primary": "#0f172a", "accent": "#1e293b", "light": "#f1f5f9", "border": "#cbd5e1"},
+    "amoled":   {"primary": "#000000", "accent": "#1f2937", "light": "#f3f4f6", "border": "#9ca3af"},
 }
 
 COLUMN_ALIASES = {
@@ -287,6 +301,26 @@ FORCE_CAPTION: str = (
     "tap <b>I have joined</b> to verify your access.\n\n"
     "Your Telegram ID: <code>{user_id}</code>"
 )
+
+
+def col_label(v: Any) -> str:
+    if v == "L" or str(v).upper() == "L":
+        return "Readable"
+    return str(v)
+
+
+def col_count(v: Any) -> int:
+    if v == "L" or str(v).upper() == "L":
+        return 1
+    try:
+        return 2 if int(v) == 2 else 1
+    except Exception:
+        return 2
+
+
+def is_readable_mode(v: Any) -> bool:
+    return v == "L" or str(v).upper() == "L"
+
 
 
 def _save_state() -> None:
@@ -489,7 +523,7 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = Fals
             InlineKeyboardButton(f"{lbl('explanation_enabled')} · {flag('explanation_enabled')}", callback_data="toggle:explanation_enabled"),
         ],
         [
-            InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+            InlineKeyboardButton(f"{lbl('columns')}: {col_label(settings['columns'])}", callback_data="cycle:columns"),
             InlineKeyboardButton(f"{lbl('page_size')}: {settings['page_size']}", callback_data="cycle:page_size"),
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
@@ -532,7 +566,7 @@ def generator_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
          InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
          InlineKeyboardButton(lbl("time"), callback_data="set:time")],
         [InlineKeyboardButton(f"{lbl('explanation_enabled')}: {expl_state}", callback_data="toggle:explanation_enabled"),
-         InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+         InlineKeyboardButton(f"{lbl('columns')}: {col_label(settings['columns'])}", callback_data="cycle:columns"),
          InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme")],
         [InlineKeyboardButton(lbl("reset"), callback_data="reset"),
          InlineKeyboardButton(lbl("generate"), callback_data="generate")],
@@ -574,7 +608,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
           • Set / Marks / Time: <code>{html.escape(str(settings['set_name']))}</code> · <code>{html.escape(str(settings['marks']))}</code> · <code>{html.escape(str(settings['time']))}</code>
 
         <b>Layout</b>
-          • Columns: <code>{settings['columns']}</code> · Theme: <code>{settings['theme'].title()}</code>
+          • Columns: <code>{col_label(settings['columns'])}</code> · Theme: <code>{settings['theme'].title()}</code>
           • Explanation: <code>{'On' if settings.get('explanation_enabled') else 'Off'}</code>
 
         <b>Source</b>
@@ -611,7 +645,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
       • Link: <code>{html.escape(str(settings['footer_link']))}</code>
 
     <b>Layout</b>
-      • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
+      • Columns: <code>{col_label(settings['columns'])}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
       • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
       • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
       • Fonts — BN: <code>{html.escape(str(settings.get('bn_font', '—')))}</code> · EN: <code>{html.escape(str(settings.get('en_font', '—')))}</code> · Math: <code>{html.escape(str(settings.get('math_font', '—')))}</code>
@@ -1288,12 +1322,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings[field] = not bool(settings.get(field))
         note = f"{field.replace('_', ' ').title()} toggled."
     elif data == "cycle:columns":
-        settings["columns"] = 1 if int(settings.get("columns", 2)) == 2 else 2
+        cur = settings.get("columns", 2)
+        order = [2, 1, "L"]
+        try:
+            idx = order.index(cur if cur in order else int(cur))
+        except Exception:
+            idx = 0
+        settings["columns"] = order[(idx + 1) % len(order)]
     elif data == "cycle:page_size":
         settings["page_size"] = "Letter" if settings.get("page_size") == "A4" else "A4"
     elif data == "cycle:theme":
         keys = list(THEMES.keys())
-        settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
+        cur = settings.get("theme", "emerald")
+        idx = keys.index(cur) if cur in keys else -1
+        settings["theme"] = keys[(idx + 1) % len(keys)]
     elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
         if not is_owner(user.id):
             try: await query.answer("Owner only.", show_alert=True)
@@ -1650,7 +1692,10 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
 
 def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
     theme = THEMES.get(settings.get("theme"), THEMES["green"])
-    columns = 2 if int(settings.get("columns", 2)) == 2 else 1
+    col_mode = settings.get("columns", 2)
+    columns = col_count(col_mode)
+    readable = is_readable_mode(col_mode)
+    body_class = "readable" if readable else "compact"
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
     bn_font = settings.get("bn_font", "Noto Sans Bengali")
@@ -1776,9 +1821,29 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .watermark-img img {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; margin: auto; width: 110mm; height: auto; max-width: 70%; max-height: 60%; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
+
+  /* Readable / "no-zoom" single-column mode — larger type, generous spacing,
+     designed so that a phone screen can read questions, options and answers
+     without pinch-zoom. */
+  body.readable {{ font-size: 14pt; line-height: 1.7; font-weight: 600; }}
+  body.readable .header h1 {{ font-size: 22pt; }}
+  body.readable .header .subtitle {{ font-size: 13pt; }}
+  body.readable .header .meta {{ font-size: 12pt; }}
+  body.readable .header .logo-circle {{ width: 64px; height: 64px; font-size: 16pt; }}
+  body.readable .header .logo {{ width: 80px; }}
+  body.readable .paper {{ column-count: 1; column-rule: none; }}
+  body.readable .question {{ padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1.2px solid #e5e7eb; }}
+  body.readable td.q-no {{ width: 56px; }}
+  body.readable .q-circle {{ min-width: 36px; height: 32px; line-height: 32px; padding: 0 11px; border-radius: 16px; font-size: 13pt; }}
+  body.readable td.q-text {{ padding-left: 16px; font-size: 14.5pt; font-weight: 700; }}
+  body.readable .q-source {{ font-size: 11pt; }}
+  body.readable table.options {{ margin: 10px 0 0 64px; width: calc(100% - 64px); }}
+  body.readable table.options td.option {{ font-size: 13.5pt; padding: 6px 10px 6px 0; font-weight: 600; }}
+  body.readable .opt-label {{ font-size: 13.5pt; }}
+  body.readable .answer, body.readable .explanation {{ margin: 10px 0 0 64px; padding: 9px 14px; font-size: 12.5pt; font-weight: 600; border-left-width: 4px; }}
 </style>
 </head>
-<body>
+<body class='{body_class}'>
   {wm_html}
   <div class='footer'>{footer_text}{(' — <a href="' + footer_link + '">' + footer_link + '</a>') if footer_link else ''}</div>
 
