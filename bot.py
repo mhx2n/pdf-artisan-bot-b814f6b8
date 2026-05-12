@@ -1313,10 +1313,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_image = mime.startswith("image/") or file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
     waiting = WAITING_FOR.get(user.id, "")
+    tgt = panel_target_uid(user.id)
     image_targets = {
-        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(tgt), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(tgt), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(tgt), None, "Thumbnail image saved."),
     }
 
     if waiting in image_targets and is_image:
@@ -1327,7 +1328,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         WAITING_FOR.pop(user.id, None)
         await _save_image_upload(context, doc, target)
         if enable_key:
-            get_settings(user.id)[enable_key] = True
+            get_settings(tgt)[enable_key] = True
         _save_state()
         try: await msg.delete()
         except Exception: pass
@@ -1339,7 +1340,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
             return
-        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        target = front_path(tgt) if waiting == "front_page" else back_path(tgt)
         kind = "front" if waiting == "front_page" else "back"
         WAITING_FOR.pop(user.id, None)
         try:
