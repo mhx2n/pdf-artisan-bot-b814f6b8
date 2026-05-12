@@ -432,7 +432,7 @@ def track(user, action: str) -> None:
     }
 
 
-def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardMarkup:
+def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = False, template_mode: bool = False) -> InlineKeyboardMarkup:
     def flag(key: str) -> str:
         return "ON" if settings.get(key) else "OFF"
 
@@ -486,6 +486,15 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
         InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
         InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
     ])
+    if owner:
+        if template_mode:
+            rows.append([
+                InlineKeyboardButton("✕ Exit User-Template Edit", callback_data="tmpl:exit"),
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton("👥 Edit User Template", callback_data="tmpl:enter"),
+            ])
     rows.append([
         InlineKeyboardButton(lbl("reset"), callback_data="reset"),
         InlineKeyboardButton(lbl("generate"), callback_data="generate"),
