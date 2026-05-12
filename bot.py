@@ -1760,14 +1760,9 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 thumbnail=thumb,
             )
             GENERATION_COUNT += 1
-            # If we generated from quizzes, clear the pool and the live status card.
-            if quiz_rows and not csv_data:
-                USER_QUIZ.pop(user.id, None)
-                _save_state()
-                stat = QUIZ_STATUS_MSG.pop(user.id, None)
-                if stat:
-                    try: await context.bot.delete_message(chat_id=stat[0], message_id=stat[1])
-                    except Exception: pass
+            # Quiz pool is preserved across generations; only /quizclear or
+            # uploading a new CSV resets it. The user can keep generating
+            # PDFs from the same collected quizzes as many times as needed.
         except Exception as exc:
             stop_flag["v"] = True
             anim_task.cancel()
