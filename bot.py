@@ -523,7 +523,7 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = Fals
             InlineKeyboardButton(f"{lbl('explanation_enabled')} · {flag('explanation_enabled')}", callback_data="toggle:explanation_enabled"),
         ],
         [
-            InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+            InlineKeyboardButton(f"{lbl('columns')}: {col_label(settings['columns'])}", callback_data="cycle:columns"),
             InlineKeyboardButton(f"{lbl('page_size')}: {settings['page_size']}", callback_data="cycle:page_size"),
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
@@ -566,7 +566,7 @@ def generator_keyboard(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
          InlineKeyboardButton(lbl("marks"), callback_data="set:marks"),
          InlineKeyboardButton(lbl("time"), callback_data="set:time")],
         [InlineKeyboardButton(f"{lbl('explanation_enabled')}: {expl_state}", callback_data="toggle:explanation_enabled"),
-         InlineKeyboardButton(f"{lbl('columns')}: {settings['columns']}", callback_data="cycle:columns"),
+         InlineKeyboardButton(f"{lbl('columns')}: {col_label(settings['columns'])}", callback_data="cycle:columns"),
          InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme")],
         [InlineKeyboardButton(lbl("reset"), callback_data="reset"),
          InlineKeyboardButton(lbl("generate"), callback_data="generate")],
@@ -608,7 +608,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
           • Set / Marks / Time: <code>{html.escape(str(settings['set_name']))}</code> · <code>{html.escape(str(settings['marks']))}</code> · <code>{html.escape(str(settings['time']))}</code>
 
         <b>Layout</b>
-          • Columns: <code>{settings['columns']}</code> · Theme: <code>{settings['theme'].title()}</code>
+          • Columns: <code>{col_label(settings['columns'])}</code> · Theme: <code>{settings['theme'].title()}</code>
           • Explanation: <code>{'On' if settings.get('explanation_enabled') else 'Off'}</code>
 
         <b>Source</b>
@@ -645,7 +645,7 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
       • Link: <code>{html.escape(str(settings['footer_link']))}</code>
 
     <b>Layout</b>
-      • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
+      • Columns: <code>{col_label(settings['columns'])}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
       • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
       • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
       • Fonts — BN: <code>{html.escape(str(settings.get('bn_font', '—')))}</code> · EN: <code>{html.escape(str(settings.get('en_font', '—')))}</code> · Math: <code>{html.escape(str(settings.get('math_font', '—')))}</code>
