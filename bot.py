@@ -577,6 +577,21 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel")]])
 
 
+def theme_picker_keyboard(current: str) -> InlineKeyboardMarkup:
+    keys = list(THEMES.keys())
+    rows: List[List[InlineKeyboardButton]] = []
+    for i in range(0, len(keys), 3):
+        chunk = keys[i:i + 3]
+        rows.append([
+            InlineKeyboardButton(
+                ("● " if k == current else "○ ") + k.title(),
+                callback_data=f"pick:theme:{k}",
+            ) for k in chunk
+        ])
+    rows.append([InlineKeyboardButton("← Back to Panel", callback_data="view:panel")])
+    return InlineKeyboardMarkup(rows)
+
+
 def buttons_editor_keyboard() -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
     keys = list(DEFAULT_BUTTON_LABELS.keys())
@@ -1331,11 +1346,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings["columns"] = order[(idx + 1) % len(order)]
     elif data == "cycle:page_size":
         settings["page_size"] = "Letter" if settings.get("page_size") == "A4" else "A4"
-    elif data == "cycle:theme":
-        keys = list(THEMES.keys())
+    elif data == "cycle:theme" or data == "view:themes":
         cur = settings.get("theme", "emerald")
-        idx = keys.index(cur) if cur in keys else -1
-        settings["theme"] = keys[(idx + 1) % len(keys)]
+        if cur not in THEMES:
+            cur = "emerald"
+        text = panel_text(user.id, settings, "Pick a theme — tap to apply.", target_uid=tgt)
+        try:
+            await query.edit_message_text(
+                text=text, reply_markup=theme_picker_keyboard(cur),
+                parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+            )
+        except BadRequest:
+            pass
+        return
+    elif data.startswith("pick:theme:"):
+        key = data.split(":", 2)[2]
+        if key in THEMES:
+            settings["theme"] = key
+            note = f"Theme → {key.title()}"
+        else:
+            note = "Unknown theme."
+    elif data == "view:panel":
+        pass  # fall through to refresh main panel
     elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
         if not is_owner(user.id):
             try: await query.answer("Owner only.", show_alert=True)
@@ -1691,7 +1723,7 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
 
 
 def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: int) -> str:
-    theme = THEMES.get(settings.get("theme"), THEMES["green"])
+    theme = THEMES.get(settings.get("theme"), THEMES["emerald"])
     col_mode = settings.get("columns", 2)
     columns = col_count(col_mode)
     readable = is_readable_mode(col_mode)
