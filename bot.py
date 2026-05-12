@@ -162,7 +162,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "explanation_enabled": True,
     "columns": 2,
     "page_size": "A4",
-    "theme": "green",
+    "theme": "emerald",
     "bn_font": "Noto Sans Bengali",
     "en_font": "Inter",
     "math_font": "STIX Two Math",
