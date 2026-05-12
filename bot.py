@@ -1031,9 +1031,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     waiting = WAITING_FOR.get(user.id, "")
     image_targets = {
-        "watermark_image": (WATERMARK_IMG_PATH, "watermark_image_enabled", "Watermark image saved and enabled."),
-        "logo_image":      (LOGO_IMG_PATH, "logo_enabled", "Logo image saved and enabled."),
-        "thumbnail_image": (THUMB_IMG_PATH, None, "Thumbnail image saved."),
+        "watermark_image": (wm_path(user.id), "watermark_image_enabled", "Watermark image saved and enabled."),
+        "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
+        "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
     }
 
     if waiting in image_targets and is_image:
