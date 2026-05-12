@@ -1130,8 +1130,9 @@ async def rename_pdf_via_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         bio.name = new_name
 
         thumb = None
-        if THUMB_IMG_PATH.exists():
-            thumb = InputFile(THUMB_IMG_PATH.open("rb"), filename="thumb.jpg")
+        tpath = thumb_path(user.id)
+        if tpath.exists():
+            thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
         await context.bot.send_document(
             chat_id=msg.chat_id,
