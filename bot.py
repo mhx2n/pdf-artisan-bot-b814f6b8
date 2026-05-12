@@ -82,6 +82,11 @@ def front_path(uid: int) -> Path:
 def back_path(uid: int) -> Path:
     return DATA_DIR / f"back_{uid}.pdf"
 
+# Sentinel UID for the "User Template" — a dedicated, owner-curated profile
+# used for ALL non-admin users (settings + assets). Owner/admin's own panel
+# changes never affect this profile.
+USER_TEMPLATE_UID: int = -1
+
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
