@@ -1293,12 +1293,17 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
+    source = (row.get("source") or "").strip()
+    source_html = (
+        f"<div class='q-source'>{html.escape(source)}</div>" if source else ""
+    )
+
     # Pill-shaped number badge: scales naturally for 1, 2, or 3 digits.
     return f"""
     <article class='question'>
       <table class='q-head'><tr>
         <td class='q-no'><span class='q-circle'>{index}</span></td>
-        <td class='q-text'>{render_inline_math(question)}</td>
+        <td class='q-text'>{source_html}{render_inline_math(question)}</td>
       </tr></table>
       {opt_rows}
       {extras}
