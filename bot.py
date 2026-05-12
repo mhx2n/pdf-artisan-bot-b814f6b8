@@ -498,8 +498,12 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
       • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
       • Fonts — BN: <code>{html.escape(str(settings.get('bn_font', '—')))}</code> · EN: <code>{html.escape(str(settings.get('en_font', '—')))}</code> · Math: <code>{html.escape(str(settings.get('math_font', '—')))}</code>
 
+    <b>Covers</b>
+      • Front: <code>{front_mode}</code> · Back: <code>{back_mode}</code>
+
     <b>Source</b>
       • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
+      • Quiz pool: <code>{quiz_count}</code> question(s)
     """).strip()
     if note:
         body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
