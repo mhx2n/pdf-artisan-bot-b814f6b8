@@ -1553,8 +1553,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     bn_font_q = bn_font.replace(" ", "+")
     en_font_q = en_font.replace(" ", "+")
     math_font_q = math_font.replace(" ", "+")
-    u_wm = wm_path(user_id)
-    u_logo = logo_path(user_id)
+    asset_uid = effective_asset_uid(user_id)
+    u_wm = wm_path(asset_uid)
+    u_logo = logo_path(asset_uid)
     use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
     use_text_wm = bool(settings.get("watermark_enabled")) and not use_image_wm
     watermark_text = html.escape(settings.get("watermark_text", "")) if use_text_wm else ""
