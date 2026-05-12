@@ -1109,7 +1109,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             BUTTON_LABELS[key] = value or DEFAULT_BUTTON_LABELS[key]
             note = f"Button '{key}' renamed."
     else:
-        settings = get_settings(user.id)
+        tgt = panel_target_uid(user.id)
+        settings = get_settings(tgt)
         if field == "watermark_opacity":
             try:
                 n = max(0, min(100, int(re.sub(r"\D", "", value) or "0")))
