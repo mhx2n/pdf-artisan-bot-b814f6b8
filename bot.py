@@ -1724,7 +1724,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    settings = get_settings(user.id).copy()
+    settings = effective_settings(user.id)
     chat_id = msg.chat.id
     track(user, "generating PDF")
 
