@@ -643,7 +643,11 @@ def help_text(user_id: int) -> str:
         <code>/frontpage</code>, <code>/backpage</code> — Upload PDF or image cover
         <code>/removefront</code>, <code>/removeback</code> — Remove cover
 
-        <b>Required channels (force-subscribe)</b>
+        <b>User Template (branding for non-admin users)</b>
+        <code>/usertemplate</code> — Edit the shared profile (logo, watermark, footer, fonts, covers…)
+        <code>/exittemplate</code> — Return to your personal panel
+        <i>Owner / admin panel changes never affect users — only the template does.</i>
+
         <code>/channels</code> — Show / manage required channels
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
         <code>/removechannel &lt;index&gt;</code>
