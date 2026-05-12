@@ -1300,13 +1300,42 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
         "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
     }
+    photo = msg.photo[-1] if msg.photo else None
+    if not photo:
+        return
+
+    # Front/back cover via compressed photo
+    if waiting in {"front_page", "back_page"}:
+        if not is_admin(user.id):
+            await msg.reply_text("Administrator only.")
+            return
+        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        kind = "front" if waiting == "front_page" else "back"
+        WAITING_FOR.pop(user.id, None)
+        try:
+            tg_file = await context.bot.get_file(photo.file_id)
+            raw = bytes(await tg_file.download_as_bytearray())
+            tmp = target.with_suffix(target.suffix + ".src")
+            tmp.write_bytes(raw)
+            try:
+                pdf_bytes = await asyncio.to_thread(_image_to_pdf_bytes, tmp)
+                target.write_bytes(pdf_bytes)
+            finally:
+                try: tmp.unlink()
+                except Exception: pass
+        except Exception as exc:
+            await msg.reply_text(f"⚠ Could not save {kind} page: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+            return
+        try: await msg.delete()
+        except Exception: pass
+        await send_or_update_panel(update, context, note=f"{kind.title()} page (image) saved.")
+        return
+
     if waiting not in image_targets:
         return
     if not is_admin(user.id):
         await msg.reply_text("Administrator only.")
-        return
-    photo = msg.photo[-1] if msg.photo else None
-    if not photo:
         return
     target, enable_key, note = image_targets[waiting]
     WAITING_FOR.pop(user.id, None)
