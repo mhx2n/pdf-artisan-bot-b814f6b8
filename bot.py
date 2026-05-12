@@ -501,12 +501,35 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     csv_status = "Loaded" if user_id in USER_CSV else "Not uploaded"
     csv_name = USER_CSV_NAME.get(user_id, "—")
     role = role_label(user_id)
+    quiz_count = len(USER_QUIZ.get(user_id, []))
+
+    if not is_admin(user_id):
+        body = textwrap.dedent(f"""
+        <b>PDF Composer</b>
+        <i>Role: {role}</i>
+
+        <b>Document</b>
+          • Title: <code>{html.escape(str(settings['title']))}</code>
+          • Subtitle: <code>{html.escape(str(settings['subtitle']))}</code>
+          • Set / Marks / Time: <code>{html.escape(str(settings['set_name']))}</code> · <code>{html.escape(str(settings['marks']))}</code> · <code>{html.escape(str(settings['time']))}</code>
+
+        <b>Layout</b>
+          • Columns: <code>{settings['columns']}</code> · Theme: <code>{settings['theme'].title()}</code>
+          • Explanation: <code>{'On' if settings.get('explanation_enabled') else 'Off'}</code>
+
+        <b>Source</b>
+          • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
+          • Quiz pool: <code>{quiz_count}</code> question(s)
+        """).strip()
+        if note:
+            body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
+        return body
+
     wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
     logo_mode = "Image" if logo_path(user_id).exists() else "Default"
     thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
     front_mode = "Set" if front_path(user_id).exists() else "None"
     back_mode = "Set" if back_path(user_id).exists() else "None"
-    quiz_count = len(USER_QUIZ.get(user_id, []))
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
