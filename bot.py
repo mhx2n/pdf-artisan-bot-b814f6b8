@@ -1177,8 +1177,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
+    # Front / back cover upload (admin only)
+    if waiting in {"front_page", "back_page"}:
+        if not is_admin(user.id):
+            await msg.reply_text("Administrator only.")
+            return
+        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        kind = "front" if waiting == "front_page" else "back"
+        WAITING_FOR.pop(user.id, None)
+        try:
+            note = await _save_front_back(context, doc, target, kind)
+        except Exception as exc:
+            await msg.reply_text(f"⚠ Could not save {kind} page: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+            return
+        try: await msg.delete()
+        except Exception: pass
+        await msg.chat.send_message(f"✓ {note}")
+        return
+
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
-        await msg.reply_text("Only .csv files are accepted.")
+        await msg.reply_text("Only .csv files are accepted (or use /frontpage / /backpage for cover uploads).")
         return
 
     await msg.chat.send_action(ChatAction.TYPING)
