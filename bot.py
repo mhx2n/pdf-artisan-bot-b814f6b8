@@ -1395,9 +1395,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 </html>"""
 
 
-def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any]) -> bytes:
+def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any], user_id: int) -> bytes:
     rows = parse_csv(csv_data)
-    html_string = build_html(rows, settings)
+    html_string = build_html(rows, settings, user_id)
     base_url = str(DATA_DIR)
     html_string = html_string.replace(
         "url('fonts/NotoSansBengali-Regular.ttf')",
