@@ -1774,7 +1774,7 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
             thumb = None
-            tpath = thumb_path(user.id)
+            tpath = thumb_path(effective_asset_uid(user.id))
             if tpath.exists():
                 thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
 
