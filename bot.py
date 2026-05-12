@@ -1444,15 +1444,24 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 </html>"""
 
 
-def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any], user_id: int) -> bytes:
-    rows = parse_csv(csv_data)
+def generate_pdf_bytes(
+    csv_data: Optional[bytes],
+    settings: Dict[str, Any],
+    user_id: int,
+    rows_override: Optional[List[Dict[str, str]]] = None,
+) -> bytes:
+    if rows_override is not None:
+        rows = rows_override
+    else:
+        rows = parse_csv(csv_data or b"")
     html_string = build_html(rows, settings, user_id)
     base_url = str(DATA_DIR)
     html_string = html_string.replace(
         "url('fonts/NotoSansBengali-Regular.ttf')",
         f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
     )
-    return HTML(string=html_string, base_url=base_url).write_pdf()
+    body_pdf = HTML(string=html_string, base_url=base_url).write_pdf()
+    return _merge_with_front_back(user_id, body_pdf)
 
 
 async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1463,10 +1472,16 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if not is_generator(user.id):
         return
+    if not await enforce_subscription(update, context):
+        return
 
     csv_data = USER_CSV.get(user.id)
-    if not csv_data:
-        await send_or_update_panel(update, context, note="No CSV uploaded yet.")
+    quiz_rows = _quizzes_to_rows(user.id)
+    if not csv_data and not quiz_rows:
+        await send_or_update_panel(
+            update, context,
+            note="Upload a CSV or forward quiz polls to begin.",
+        )
         return
 
     settings = get_settings(user.id).copy()
@@ -1501,14 +1516,20 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
-            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings, user.id)
+            pdf_bytes = await asyncio.to_thread(
+                generate_pdf_bytes, csv_data, settings, user.id,
+                quiz_rows if quiz_rows and not csv_data else None,
+            )
             stop_flag["v"] = True
             anim_task.cancel()
             try: await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
             except Exception: pass
 
-            base = USER_CSV_NAME.get(user.id, "document.csv")
-            filename = re.sub(r"\.csv$", "", base, flags=re.IGNORECASE) + ".pdf"
+            if csv_data:
+                base = USER_CSV_NAME.get(user.id, "document.csv")
+                filename = re.sub(r"\.csv$", "", base, flags=re.IGNORECASE) + ".pdf"
+            else:
+                filename = "quiz_collection.pdf"
 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
