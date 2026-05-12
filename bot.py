@@ -213,25 +213,52 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
 }
 
 THEMES = {
+    # ── Basic 7 (real, classic, professional) ──────────────────────────────
     "emerald":  {"primary": "#0f766e", "accent": "#16a34a", "light": "#ecfdf5", "border": "#99f6e4"},
-    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
-    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
     "ocean":    {"primary": "#0369a1", "accent": "#0284c7", "light": "#f0f9ff", "border": "#bae6fd"},
     "sapphire": {"primary": "#1d4ed8", "accent": "#2563eb", "light": "#eff6ff", "border": "#bfdbfe"},
-    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
     "indigo":   {"primary": "#4338ca", "accent": "#6366f1", "light": "#eef2ff", "border": "#c7d2fe"},
+    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
+    # ── Greens / nature ────────────────────────────────────────────────────
+    "forest":   {"primary": "#166534", "accent": "#15803d", "light": "#f0fdf4", "border": "#bbf7d0"},
+    "mint":     {"primary": "#0d9488", "accent": "#14b8a6", "light": "#f0fdfa", "border": "#99f6e4"},
+    "lime":     {"primary": "#3f6212", "accent": "#65a30d", "light": "#f7fee7", "border": "#d9f99d"},
+    "sage":     {"primary": "#4d7c0f", "accent": "#84cc16", "light": "#f7fee7", "border": "#bef264"},
+    # ── Blues ──────────────────────────────────────────────────────────────
+    "sky":      {"primary": "#0284c7", "accent": "#38bdf8", "light": "#f0f9ff", "border": "#bae6fd"},
+    "azure":    {"primary": "#1e40af", "accent": "#3b82f6", "light": "#eff6ff", "border": "#bfdbfe"},
+    "royal":    {"primary": "#1e3a8a", "accent": "#3730a3", "light": "#eef2ff", "border": "#c7d2fe"},
+    "teal":     {"primary": "#115e59", "accent": "#0d9488", "light": "#f0fdfa", "border": "#5eead4"},
+    # ── Purples / violets ──────────────────────────────────────────────────
     "violet":   {"primary": "#6d28d9", "accent": "#8b5cf6", "light": "#f5f3ff", "border": "#ddd6fe"},
     "purple":   {"primary": "#7e22ce", "accent": "#9333ea", "light": "#faf5ff", "border": "#e9d5ff"},
-    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "lavender": {"primary": "#7c3aed", "accent": "#a78bfa", "light": "#f5f3ff", "border": "#ddd6fe"},
+    "grape":    {"primary": "#581c87", "accent": "#7e22ce", "light": "#faf5ff", "border": "#e9d5ff"},
+    # ── Pinks / cute ───────────────────────────────────────────────────────
     "pink":     {"primary": "#be185d", "accent": "#db2777", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "bubblegum":{"primary": "#db2777", "accent": "#f472b6", "light": "#fdf2f8", "border": "#fbcfe8"},
+    "blossom":  {"primary": "#e11d48", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
     "rose":     {"primary": "#e11d48", "accent": "#f43f5e", "light": "#fff1f2", "border": "#fecdd3"},
-    "crimson":  {"primary": "#b91c1c", "accent": "#dc2626", "light": "#fef2f2", "border": "#fecaca"},
+    "magenta":  {"primary": "#a21caf", "accent": "#c026d3", "light": "#fdf4ff", "border": "#f5d0fe"},
+    "candy":    {"primary": "#c026d3", "accent": "#e879f9", "light": "#fdf4ff", "border": "#f5d0fe"},
+    # ── Warm / sunset ──────────────────────────────────────────────────────
+    "coral":    {"primary": "#e11d48", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
+    "peach":    {"primary": "#ea580c", "accent": "#fb923c", "light": "#fff7ed", "border": "#fed7aa"},
     "sunset":   {"primary": "#c2410c", "accent": "#f97316", "light": "#fff7ed", "border": "#fed7aa"},
-    "amber":    {"primary": "#b45309", "accent": "#f59e0b", "light": "#fffbeb", "border": "#fde68a"},
+    "tangerine":{"primary": "#c2410c", "accent": "#fb923c", "light": "#fff7ed", "border": "#fed7aa"},
+    "honey":    {"primary": "#a16207", "accent": "#eab308", "light": "#fefce8", "border": "#fef08a"},
+    # ── Neutrals / dark / pro ──────────────────────────────────────────────
     "slate":    {"primary": "#334155", "accent": "#475569", "light": "#f8fafc", "border": "#cbd5e1"},
-    "graphite": {"primary": "#1f2937", "accent": "#4b5563", "light": "#f9fafb", "border": "#d1d5db"},
     "midnight": {"primary": "#0f172a", "accent": "#1e293b", "light": "#f1f5f9", "border": "#cbd5e1"},
     "amoled":   {"primary": "#000000", "accent": "#1f2937", "light": "#f3f4f6", "border": "#9ca3af"},
+    "mocha":    {"primary": "#78350f", "accent": "#b45309", "light": "#fffbeb", "border": "#fde68a"},
+    # ── Cute pastels ───────────────────────────────────────────────────────
+    "cotton":   {"primary": "#9333ea", "accent": "#c084fc", "light": "#faf5ff", "border": "#e9d5ff"},
+    "sorbet":   {"primary": "#f43f5e", "accent": "#fb7185", "light": "#fff1f2", "border": "#fecdd3"},
+    "macaron":  {"primary": "#0d9488", "accent": "#5eead4", "light": "#f0fdfa", "border": "#99f6e4"},
+    "marshmallow":{"primary": "#7c3aed", "accent": "#c4b5fd", "light": "#f5f3ff", "border": "#ddd6fe"},
 }
 
 COLUMN_ALIASES = {
@@ -1694,13 +1721,23 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     if settings.get("answer_enabled") and answer:
         ans_str = str(answer).strip()
         num_to_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}
+        ans_display = ""
         if ans_str in num_to_letter:
             ans_display = num_to_letter[ans_str]
         elif ans_str.upper() in {"A", "B", "C", "D"}:
             ans_display = ans_str.upper()
         else:
-            ans_display = ans_str
-        extras += f"<div class='answer'><b>Answer:</b> {render_inline_math(ans_display)}</div>"
+            # Try to match the answer text against the four options to derive
+            # the correct letter (A/B/C/D). We never print the raw text.
+            target = " ".join(ans_str.lower().split())
+            letters = ["A", "B", "C", "D"]
+            for i, key in enumerate(("option_a", "option_b", "option_c", "option_d")):
+                opt = " ".join(str(row.get(key, "")).lower().split())
+                if opt and (opt == target or opt in target or target in opt):
+                    ans_display = letters[i]
+                    break
+        if ans_display:
+            extras += f"<div class='answer'><b>Answer:</b> {ans_display}</div>"
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
@@ -1818,8 +1855,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .header .subtitle {{ margin-top: 2px; color: #374151; font-size: 10.5pt; }}
   .header .meta {{ text-align: right; font-weight: 700; white-space: nowrap; width: 1%; font-size: 10pt; line-height: 1.5; }}
 
-  .paper {{ column-count: {columns}; column-gap: 10mm; column-rule: 0.5px solid {theme['border']}; column-fill: auto; }}
-  .question {{ break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; margin-bottom: 9px; }}
+  .paper {{ column-count: {columns}; column-gap: 8mm; column-rule: none; column-fill: balance; text-align: justify; text-justify: inter-word; hyphens: auto; }}
+  .question {{ break-inside: avoid; page-break-inside: avoid; padding: 10px 12px; margin-bottom: 10px; background: #ffffff; border: 1px solid {theme['border']}; border-radius: 8px; overflow: hidden; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
   td.q-no {{ width: 40px; vertical-align: top; padding: 0 8px 0 0; }}
@@ -1836,11 +1873,11 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   td.q-text {{ padding-left: 12px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
   .q-source {{ font-size: 8.5pt; color: {theme['primary']}; font-style: italic; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.2px; }}
 
-  table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
-  table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; font-weight: 600; }}
+  table.options {{ table-layout: fixed; margin: 6px 0 0 0; width: 100%; }}
+  table.options td.option {{ width: 50%; padding: 3px 8px 3px 0; vertical-align: top; word-wrap: break-word; font-weight: 600; text-align: left; }}
   .opt-label {{ color: {theme['primary']}; font-weight: 800; margin-right: 4px; }}
 
-  .answer, .explanation {{ margin: 5px 0 0 48px; padding: 5px 8px; border-left: 3px solid {theme['accent']}; background: #f8fafc; font-size: 9.5pt; font-weight: 500; break-inside: avoid; }}
+  .answer, .explanation {{ margin: 6px 0 0 0; padding: 6px 10px; border-left: 3px solid {theme['accent']}; background: {theme['light']}; font-size: 9.5pt; font-weight: 500; border-radius: 0 4px 4px 0; break-inside: avoid; text-align: left; }}
 
   .frac {{ display: inline-block; vertical-align: middle; text-align: center; line-height: 1; font-size: 0.9em; }}
   .frac span {{ display: block; }}
@@ -1864,15 +1901,15 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   body.readable .header .logo-circle {{ width: 64px; height: 64px; font-size: 16pt; }}
   body.readable .header .logo {{ width: 80px; }}
   body.readable .paper {{ column-count: 1; column-rule: none; }}
-  body.readable .question {{ padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1.2px solid #e5e7eb; }}
+  body.readable .question {{ padding: 14px 16px; margin-bottom: 14px; border: 1.2px solid {theme['border']}; border-radius: 10px; }}
   body.readable td.q-no {{ width: 56px; }}
   body.readable .q-circle {{ min-width: 36px; height: 32px; line-height: 32px; padding: 0 11px; border-radius: 16px; font-size: 13pt; }}
   body.readable td.q-text {{ padding-left: 16px; font-size: 14.5pt; font-weight: 700; }}
   body.readable .q-source {{ font-size: 11pt; }}
-  body.readable table.options {{ margin: 10px 0 0 64px; width: calc(100% - 64px); }}
+  body.readable table.options {{ margin: 10px 0 0 0; width: 100%; }}
   body.readable table.options td.option {{ font-size: 13.5pt; padding: 6px 10px 6px 0; font-weight: 600; }}
   body.readable .opt-label {{ font-size: 13.5pt; }}
-  body.readable .answer, body.readable .explanation {{ margin: 10px 0 0 64px; padding: 9px 14px; font-size: 12.5pt; font-weight: 600; border-left-width: 4px; }}
+  body.readable .answer, body.readable .explanation {{ margin: 10px 0 0 0; padding: 9px 14px; font-size: 12.5pt; font-weight: 600; border-left-width: 4px; }}
 </style>
 </head>
 <body class='{body_class}'>
