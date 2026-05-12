@@ -1901,15 +1901,15 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   body.readable .header .logo-circle {{ width: 64px; height: 64px; font-size: 16pt; }}
   body.readable .header .logo {{ width: 80px; }}
   body.readable .paper {{ column-count: 1; column-rule: none; }}
-  body.readable .question {{ padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1.2px solid #e5e7eb; }}
+  body.readable .question {{ padding: 14px 16px; margin-bottom: 14px; border: 1.2px solid {theme['border']}; border-radius: 10px; }}
   body.readable td.q-no {{ width: 56px; }}
   body.readable .q-circle {{ min-width: 36px; height: 32px; line-height: 32px; padding: 0 11px; border-radius: 16px; font-size: 13pt; }}
   body.readable td.q-text {{ padding-left: 16px; font-size: 14.5pt; font-weight: 700; }}
   body.readable .q-source {{ font-size: 11pt; }}
-  body.readable table.options {{ margin: 10px 0 0 64px; width: calc(100% - 64px); }}
+  body.readable table.options {{ margin: 10px 0 0 0; width: 100%; }}
   body.readable table.options td.option {{ font-size: 13.5pt; padding: 6px 10px 6px 0; font-weight: 600; }}
   body.readable .opt-label {{ font-size: 13.5pt; }}
-  body.readable .answer, body.readable .explanation {{ margin: 10px 0 0 64px; padding: 9px 14px; font-size: 12.5pt; font-weight: 600; border-left-width: 4px; }}
+  body.readable .answer, body.readable .explanation {{ margin: 10px 0 0 0; padding: 9px 14px; font-size: 12.5pt; font-weight: 600; border-left-width: 4px; }}
 </style>
 </head>
 <body class='{body_class}'>
