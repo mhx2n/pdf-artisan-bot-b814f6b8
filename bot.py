@@ -982,6 +982,20 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await cmd_removechannel(update, context, args)
         elif cmd == "setjoinmsg":
             await cmd_setjoinmsg(update, context, args)
+        elif cmd == "usertemplate":
+            EDIT_TEMPLATE.add(user.id)
+            PANEL_MSG.pop(user.id, None)
+            await send_or_update_panel(
+                update, context,
+                note="Editing the User Template — every change here applies to non-admin users.",
+            )
+        elif cmd == "exittemplate":
+            EDIT_TEMPLATE.discard(user.id)
+            PANEL_MSG.pop(user.id, None)
+            await send_or_update_panel(
+                update, context,
+                note="Back to your personal panel.",
+            )
         else:
             real = alias_map.get(cmd, cmd)
             await handle_role_command(real, args, update, context)
