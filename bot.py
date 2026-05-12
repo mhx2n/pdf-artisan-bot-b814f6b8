@@ -1302,12 +1302,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings[field] = not bool(settings.get(field))
         note = f"{field.replace('_', ' ').title()} toggled."
     elif data == "cycle:columns":
-        settings["columns"] = 1 if int(settings.get("columns", 2)) == 2 else 2
+        cur = settings.get("columns", 2)
+        order = [2, 1, "L"]
+        try:
+            idx = order.index(cur if cur in order else int(cur))
+        except Exception:
+            idx = 0
+        settings["columns"] = order[(idx + 1) % len(order)]
     elif data == "cycle:page_size":
         settings["page_size"] = "Letter" if settings.get("page_size") == "A4" else "A4"
     elif data == "cycle:theme":
         keys = list(THEMES.keys())
-        settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
+        cur = settings.get("theme", "emerald")
+        idx = keys.index(cur) if cur in keys else -1
+        settings["theme"] = keys[(idx + 1) % len(keys)]
     elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
         if not is_owner(user.id):
             try: await query.answer("Owner only.", show_alert=True)
