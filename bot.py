@@ -2050,8 +2050,11 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             bio.name = filename
             thumb = None
             tpath = thumb_path(effective_asset_uid(user.id))
-            if tpath.exists():
-                thumb = InputFile(tpath.open("rb"), filename="thumb.jpg")
+            if tpath.exists() and tpath.stat().st_size > 0:
+                try:
+                    thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
+                except Exception:
+                    thumb = None
 
             await context.bot.send_document(
                 chat_id=chat_id,
