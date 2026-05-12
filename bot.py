@@ -476,6 +476,9 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
     logo_mode = "Image" if logo_path(user_id).exists() else "Default"
     thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
+    front_mode = "Set" if front_path(user_id).exists() else "None"
+    back_mode = "Set" if back_path(user_id).exists() else "None"
+    quiz_count = len(USER_QUIZ.get(user_id, []))
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
