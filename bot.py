@@ -931,9 +931,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         return
+    if not await enforce_subscription(update, context):
+        return
     PANEL_MSG.pop(user.id, None)
     WAITING_FOR.pop(user.id, None)
-    await send_or_update_panel(update, context, note="Upload a CSV file to begin.")
+    await send_or_update_panel(update, context, note="Upload a CSV file or forward quiz polls to begin.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
