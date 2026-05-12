@@ -1275,6 +1275,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = bytes(await tg_file.download_as_bytearray())
     USER_CSV[user.id] = data
     USER_CSV_NAME[user.id] = doc.file_name or "uploaded.csv"
+    # New CSV resets any pending quiz pool
+    USER_QUIZ.pop(user.id, None)
+    stat = QUIZ_STATUS_MSG.pop(user.id, None)
+    if stat:
+        try: await context.bot.delete_message(chat_id=stat[0], message_id=stat[1])
+        except Exception: pass
     _save_state()
 
     try: await msg.delete()
