@@ -688,7 +688,9 @@ async def send_or_update_panel(
     user_id = user.id
     if not is_generator(user_id):
         return
-    settings = get_settings(user_id)
+    tgt = panel_target_uid(user_id)
+    settings = get_settings(tgt)
+    template_mode = (tgt == USER_TEMPLATE_UID)
 
     if waiting_field in {"watermark_image", "logo_image", "thumbnail_image", "front_page", "back_page"}:
         kind_map = {
@@ -699,25 +701,28 @@ async def send_or_update_panel(
             "back_page": ("back cover", "PDF or image"),
         }
         kind, fmt = kind_map[waiting_field]
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting upload</b>\nSend a {fmt} file to use as the {kind}."
         )
         markup = cancel_keyboard()
     elif waiting_field and waiting_field.startswith("btnlabel:"):
         key = waiting_field.split(":", 1)[1]
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting input</b>\nReply with the new label (emoji allowed) for <b>{html.escape(key)}</b>."
         )
         markup = cancel_keyboard()
     elif waiting_field:
         label = FIELD_LABELS.get(waiting_field, waiting_field)
-        text = panel_text(user_id, settings, note) + (
+        text = panel_text(user_id, settings, note, target_uid=tgt) + (
             f"\n\n<b>Awaiting input</b>\nReply with the new <b>{html.escape(label)}</b>."
         )
         markup = cancel_keyboard()
     else:
-        text = panel_text(user_id, settings, note)
-        markup = main_keyboard(settings, is_admin(user_id)) if is_admin(user_id) else generator_keyboard(settings)
+        text = panel_text(user_id, settings, note, target_uid=tgt)
+        if is_admin(user_id):
+            markup = main_keyboard(settings, True, owner=is_owner(user_id), template_mode=template_mode)
+        else:
+            markup = generator_keyboard(settings)
 
     chat_id = update.effective_chat.id if update.effective_chat else user_id
     panel = PANEL_MSG.get(user_id)
