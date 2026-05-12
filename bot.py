@@ -1166,12 +1166,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except Exception: pass
             return
 
-    # Admin-only image uploads & toggles
+    # Admin-only image uploads & toggles (presentation/branding fields)
     admin_only_actions = {
         "upload:watermark_image", "upload:logo_image", "upload:thumbnail_image",
         "upload:front_page", "upload:back_page",
         "toggle:watermark_enabled", "toggle:watermark_image_enabled", "toggle:logo_enabled",
-        "toggle:answer_enabled", "toggle:explanation_enabled",
+        "toggle:answer_enabled",
         "set:watermark_text", "set:watermark_opacity",
         "set:footer_text", "set:footer_link",
         "cycle:page_size",
@@ -1201,8 +1201,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keys = list(THEMES.keys())
         settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
     elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
-        if not is_admin(user.id):
-            try: await query.answer("Administrator only.", show_alert=True)
+        if not is_owner(user.id):
+            try: await query.answer("Owner only.", show_alert=True)
             except Exception: pass
             return
         field = data.split(":", 1)[1]
