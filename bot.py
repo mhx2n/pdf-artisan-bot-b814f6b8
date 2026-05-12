@@ -74,6 +74,14 @@ def logo_path(uid: int) -> Path:
 def thumb_path(uid: int) -> Path:
     return DATA_DIR / f"thumb_{uid}.jpg"
 
+
+def front_path(uid: int) -> Path:
+    return DATA_DIR / f"front_{uid}.pdf"
+
+
+def back_path(uid: int) -> Path:
+    return DATA_DIR / f"back_{uid}.pdf"
+
 LOG_BUFFER: Deque[str] = deque(maxlen=2000)
 ERROR_BUFFER: Deque[Tuple[float, str]] = deque(maxlen=500)
 
@@ -214,6 +222,20 @@ ADMIN_IDS: Set[int] = set()       # full composer access
 GENERATOR_IDS: Set[int] = set()   # generate-only access
 USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# --- Quiz collection (forward Telegram quizzes → PDF) -----------------------
+USER_QUIZ: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+QUIZ_STATUS_MSG: Dict[int, Tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
+QUIZ_MODE_DEFAULT_ON = True   # any forwarded poll is auto-collected
+
+# --- Force subscription ------------------------------------------------------
+# Each entry: {"chat": "@channel" or -100xxxx, "title": str, "link": str, "button": str}
+FORCE_CHANNELS: List[Dict[str, str]] = []
+FORCE_CAPTION: str = (
+    "<b>Membership required</b>\n\n"
+    "To use this service, please join the channel(s) below and then tap "
+    "<b>I have joined</b> to verify your access."
+)
+
 
 def _save_state() -> None:
     try:
@@ -224,6 +246,9 @@ def _save_state() -> None:
             "user_csv": {str(k): base64.b64encode(v).decode() for k, v in USER_CSV.items()},
             "admins": list(ADMIN_IDS),
             "generators": list(GENERATOR_IDS),
+            "user_quiz": {str(k): v for k, v in USER_QUIZ.items() if v},
+            "force_channels": FORCE_CHANNELS,
+            "force_caption": FORCE_CAPTION,
         }
         STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
@@ -231,6 +256,7 @@ def _save_state() -> None:
 
 
 def _load_state() -> None:
+    global FORCE_CAPTION
     if not STATE_PATH.exists():
         return
     try:
@@ -255,6 +281,23 @@ def _load_state() -> None:
         for uid in payload.get("generators") or []:
             try: GENERATOR_IDS.add(int(uid))
             except Exception: pass
+        for k, v in (payload.get("user_quiz") or {}).items():
+            try: USER_QUIZ[int(k)] = list(v) if isinstance(v, list) else []
+            except Exception: pass
+        fc = payload.get("force_channels")
+        if isinstance(fc, list):
+            FORCE_CHANNELS.clear()
+            for entry in fc:
+                if isinstance(entry, dict) and entry.get("chat"):
+                    FORCE_CHANNELS.append({
+                        "chat": str(entry.get("chat", "")),
+                        "title": str(entry.get("title", "Channel")),
+                        "link": str(entry.get("link", "")),
+                        "button": str(entry.get("button", "Join Channel")),
+                    })
+        cap = payload.get("force_caption")
+        if isinstance(cap, str) and cap.strip():
+            FORCE_CAPTION = cap
         logger.info("State restored from %s", STATE_PATH)
     except Exception:
         logger.exception("Failed to load state")
@@ -355,6 +398,11 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
         [
+            InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
+            InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
+            InlineKeyboardButton("Quiz Mode", callback_data="quiz:start"),
+        ],
+        [
             InlineKeyboardButton(lbl("reset"), callback_data="reset"),
             InlineKeyboardButton(lbl("generate"), callback_data="generate"),
         ],
@@ -453,6 +501,22 @@ def help_text(user_id: int) -> str:
         <code>/restart</code> — Restart the bot (state preserved)
         <code>/help</code> — Show this message
 
+        <b>Quiz → PDF</b>
+        <code>/quiz</code> — Open the quiz collector card
+        <code>/quizclear</code> — Clear collected quiz polls
+        <code>/genquiz</code> — Generate PDF from collected polls
+        <i>(Forwarding any quiz poll auto-collects it.)</i>
+
+        <b>Front / Back covers</b>
+        <code>/frontpage</code>, <code>/backpage</code> — Upload PDF or image cover
+        <code>/removefront</code>, <code>/removeback</code> — Remove cover
+
+        <b>Required channels (force-subscribe)</b>
+        <code>/channels</code> — Show / manage required channels
+        <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
+        <code>/removechannel &lt;index&gt;</code>
+        <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption
+
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
         <i>All commands also accept the </i><code>.</code><i> prefix.</i>
@@ -516,10 +580,17 @@ async def send_or_update_panel(
         return
     settings = get_settings(user_id)
 
-    if waiting_field in {"watermark_image", "logo_image", "thumbnail_image"}:
-        kind = {"watermark_image": "watermark", "logo_image": "logo", "thumbnail_image": "thumbnail"}[waiting_field]
+    if waiting_field in {"watermark_image", "logo_image", "thumbnail_image", "front_page", "back_page"}:
+        kind_map = {
+            "watermark_image": ("watermark image", "PNG or JPG"),
+            "logo_image": ("logo image", "PNG or JPG"),
+            "thumbnail_image": ("thumbnail image", "PNG or JPG"),
+            "front_page": ("front cover", "PDF or image"),
+            "back_page": ("back cover", "PDF or image"),
+        }
+        kind, fmt = kind_map[waiting_field]
         text = panel_text(user_id, settings, note) + (
-            f"\n\n<b>Awaiting upload</b>\nSend a PNG or JPG image to use as {kind}."
+            f"\n\n<b>Awaiting upload</b>\nSend a {fmt} file to use as the {kind}."
         )
         markup = cancel_keyboard()
     elif waiting_field and waiting_field.startswith("btnlabel:"):
@@ -762,9 +833,10 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "addadmin", "removeadmin",
         "addgen", "removegen",
         "allow", "deny", "promote", "demote",
+        "channels", "addchannel", "removechannel", "setjoinmsg",
     }
     alias_map = {
-        "users": "users",      # combined listing
+        "users": "users",
         "allow": "addgen",
         "deny": "removegen",
         "promote": "addadmin",
@@ -790,21 +862,66 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 + _format_id_list(GENERATOR_IDS, "Generator Users")
             )
             await msg.reply_text(text, parse_mode=ParseMode.HTML)
+        elif cmd == "channels":
+            await cmd_channels(update, context)
+        elif cmd == "addchannel":
+            await cmd_addchannel(update, context, args)
+        elif cmd == "removechannel":
+            await cmd_removechannel(update, context, args)
+        elif cmd == "setjoinmsg":
+            await cmd_setjoinmsg(update, context, args)
         else:
             real = alias_map.get(cmd, cmd)
             await handle_role_command(real, args, update, context)
         return True
 
+    # Admin-only commands (front / back page management)
+    admin_cmds = {"frontpage", "backpage", "removefront", "removeback"}
+    if cmd in admin_cmds:
+        if not is_admin(user.id):
+            await msg.reply_text("This command is restricted to administrators.")
+            return True
+        if not await enforce_subscription(update, context):
+            return True
+        if cmd == "frontpage":
+            WAITING_FOR[user.id] = "front_page"
+            await msg.reply_text(
+                "Send the <b>front cover</b> as a PDF or image. It will be inserted "
+                "as the first page(s) of every generated PDF.",
+                parse_mode=ParseMode.HTML,
+            )
+        elif cmd == "backpage":
+            WAITING_FOR[user.id] = "back_page"
+            await msg.reply_text(
+                "Send the <b>back cover</b> as a PDF or image. It will be appended "
+                "as the final page(s) of every generated PDF.",
+                parse_mode=ParseMode.HTML,
+            )
+        elif cmd == "removefront":
+            try: front_path(user.id).unlink()
+            except FileNotFoundError: pass
+            await msg.reply_text("✓ Front cover removed.")
+        elif cmd == "removeback":
+            try: back_path(user.id).unlink()
+            except FileNotFoundError: pass
+            await msg.reply_text("✓ Back cover removed.")
+        return True
+
     # Generator-or-better commands
-    gen_cmds = {"panel", "menu", "generate", "reset", "status", "clear"}
+    gen_cmds = {
+        "panel", "menu", "generate", "reset", "status", "clear",
+        "quiz", "quizclear", "genquiz",
+    }
     if cmd in gen_cmds:
         if not is_generator(user.id):
             await msg.reply_text("This command is not available for your account.")
             return True
+        if not await enforce_subscription(update, context):
+            return True
         if cmd in {"panel", "menu"}:
             PANEL_MSG.pop(user.id, None)
             await send_or_update_panel(update, context)
-        elif cmd == "generate":
+        elif cmd == "generate" or cmd == "genquiz":
             await generate_for_user(update, context)
         elif cmd == "reset":
             USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy(); _save_state()
@@ -814,6 +931,10 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "clear":
             USER_CSV.pop(user.id, None); USER_CSV_NAME.pop(user.id, None); _save_state()
             await send_or_update_panel(update, context, note="CSV cleared.")
+        elif cmd == "quiz":
+            await cmd_quizstart(update, context)
+        elif cmd == "quizclear":
+            await cmd_quizclear(update, context)
         return True
 
     await msg.reply_text("Unknown command.")
@@ -838,9 +959,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         return
+    if not await enforce_subscription(update, context):
+        return
     PANEL_MSG.pop(user.id, None)
     WAITING_FOR.pop(user.id, None)
-    await send_or_update_panel(update, context, note="Upload a CSV file to begin.")
+    await send_or_update_panel(update, context, note="Upload a CSV file or forward quiz polls to begin.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -914,8 +1037,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     track(user, f"btn:{query.data}")
-    settings = get_settings(user.id)
     data = query.data or ""
+
+    # Force-subscribe verification button — always allowed.
+    if data == "fsub:check":
+        pending = await missing_subscriptions(context, user.id)
+        if not pending:
+            try:
+                await query.edit_message_text(
+                    "<b>Membership verified.</b> You can continue using the bot.",
+                    parse_mode=ParseMode.HTML,
+                )
+            except BadRequest: pass
+            return
+        try:
+            await query.answer("You have not joined all required channels yet.", show_alert=True)
+            await query.edit_message_reply_markup(reply_markup=_join_keyboard(pending))
+        except BadRequest: pass
+        return
+
+    # Quiz status card buttons
+    if data == "quiz:gen":
+        await generate_for_user(update, context)
+        return
+    if data == "quiz:clear":
+        USER_QUIZ.pop(user.id, None); _save_state()
+        await _refresh_quiz_status(context, user.id, query.message.chat_id)
+        return
+    if data == "quiz:start":
+        await _refresh_quiz_status(context, user.id, query.message.chat_id)
+        return
+    if not await enforce_subscription(update, context):
+        return
+
+    settings = get_settings(user.id)
     note: Optional[str] = None
     waiting_field: Optional[str] = None
 
@@ -961,6 +1116,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Admin-only image uploads & toggles
     admin_only_actions = {
         "upload:watermark_image", "upload:logo_image", "upload:thumbnail_image",
+        "upload:front_page", "upload:back_page",
         "toggle:watermark_enabled", "toggle:watermark_image_enabled", "toggle:logo_enabled",
         "toggle:answer_enabled", "toggle:explanation_enabled",
         "set:watermark_text", "set:watermark_opacity",
@@ -1051,8 +1207,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
+    # Front / back cover upload (admin only)
+    if waiting in {"front_page", "back_page"}:
+        if not is_admin(user.id):
+            await msg.reply_text("Administrator only.")
+            return
+        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        kind = "front" if waiting == "front_page" else "back"
+        WAITING_FOR.pop(user.id, None)
+        try:
+            note = await _save_front_back(context, doc, target, kind)
+        except Exception as exc:
+            await msg.reply_text(f"⚠ Could not save {kind} page: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+            return
+        try: await msg.delete()
+        except Exception: pass
+        await msg.chat.send_message(f"✓ {note}")
+        return
+
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
-        await msg.reply_text("Only .csv files are accepted.")
+        await msg.reply_text("Only .csv files are accepted (or use /frontpage / /backpage for cover uploads).")
         return
 
     await msg.chat.send_action(ChatAction.TYPING)
@@ -1250,12 +1425,17 @@ def question_html(row: Dict[str, str], index: int, settings: Dict[str, Any]) -> 
     if settings.get("explanation_enabled") and explanation:
         extras += f"<div class='explanation'><b>Explanation:</b> {render_inline_math(explanation)}</div>"
 
+    source = (row.get("source") or "").strip()
+    source_html = (
+        f"<div class='q-source'>{html.escape(source)}</div>" if source else ""
+    )
+
     # Pill-shaped number badge: scales naturally for 1, 2, or 3 digits.
     return f"""
     <article class='question'>
       <table class='q-head'><tr>
         <td class='q-no'><span class='q-circle'>{index}</span></td>
-        <td class='q-text'>{render_inline_math(question)}</td>
+        <td class='q-text'>{source_html}{render_inline_math(question)}</td>
       </tr></table>
       {opt_rows}
       {extras}
@@ -1357,6 +1537,7 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
       box-sizing: border-box;
   }}
   td.q-text {{ padding-left: 12px; font-weight: 600; vertical-align: top; word-wrap: break-word; }}
+  .q-source {{ font-size: 8.5pt; color: {theme['primary']}; font-style: italic; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.2px; }}
 
   table.options {{ table-layout: fixed; margin: 4px 0 0 48px; width: calc(100% - 48px); }}
   table.options td.option {{ width: 50%; padding: 2px 6px 2px 0; vertical-align: top; word-wrap: break-word; }}
@@ -1395,15 +1576,24 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 </html>"""
 
 
-def generate_pdf_bytes(csv_data: bytes, settings: Dict[str, Any], user_id: int) -> bytes:
-    rows = parse_csv(csv_data)
+def generate_pdf_bytes(
+    csv_data: Optional[bytes],
+    settings: Dict[str, Any],
+    user_id: int,
+    rows_override: Optional[List[Dict[str, str]]] = None,
+) -> bytes:
+    if rows_override is not None:
+        rows = rows_override
+    else:
+        rows = parse_csv(csv_data or b"")
     html_string = build_html(rows, settings, user_id)
     base_url = str(DATA_DIR)
     html_string = html_string.replace(
         "url('fonts/NotoSansBengali-Regular.ttf')",
         f"url('file://{BASE_DIR}/fonts/NotoSansBengali-Regular.ttf')",
     )
-    return HTML(string=html_string, base_url=base_url).write_pdf()
+    body_pdf = HTML(string=html_string, base_url=base_url).write_pdf()
+    return _merge_with_front_back(user_id, body_pdf)
 
 
 async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1414,10 +1604,16 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if not is_generator(user.id):
         return
+    if not await enforce_subscription(update, context):
+        return
 
     csv_data = USER_CSV.get(user.id)
-    if not csv_data:
-        await send_or_update_panel(update, context, note="No CSV uploaded yet.")
+    quiz_rows = _quizzes_to_rows(user.id)
+    if not csv_data and not quiz_rows:
+        await send_or_update_panel(
+            update, context,
+            note="Upload a CSV or forward quiz polls to begin.",
+        )
         return
 
     settings = get_settings(user.id).copy()
@@ -1452,14 +1648,20 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         try:
             await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
-            pdf_bytes = await asyncio.to_thread(generate_pdf_bytes, csv_data, settings, user.id)
+            pdf_bytes = await asyncio.to_thread(
+                generate_pdf_bytes, csv_data, settings, user.id,
+                quiz_rows if quiz_rows and not csv_data else None,
+            )
             stop_flag["v"] = True
             anim_task.cancel()
             try: await context.bot.delete_message(chat_id=chat_id, message_id=progress.message_id)
             except Exception: pass
 
-            base = USER_CSV_NAME.get(user.id, "document.csv")
-            filename = re.sub(r"\.csv$", "", base, flags=re.IGNORECASE) + ".pdf"
+            if csv_data:
+                base = USER_CSV_NAME.get(user.id, "document.csv")
+                filename = re.sub(r"\.csv$", "", base, flags=re.IGNORECASE) + ".pdf"
+            else:
+                filename = "quiz_collection.pdf"
 
             bio = io.BytesIO(pdf_bytes)
             bio.name = filename
@@ -1475,6 +1677,14 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 thumbnail=thumb,
             )
             GENERATION_COUNT += 1
+            # If we generated from quizzes, clear the pool and the live status card.
+            if quiz_rows and not csv_data:
+                USER_QUIZ.pop(user.id, None)
+                _save_state()
+                stat = QUIZ_STATUS_MSG.pop(user.id, None)
+                if stat:
+                    try: await context.bot.delete_message(chat_id=stat[0], message_id=stat[1])
+                    except Exception: pass
         except Exception as exc:
             stop_flag["v"] = True
             anim_task.cancel()
@@ -1490,6 +1700,415 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 # ---------------------------------------------------------------------------
+# Force-subscribe gate
+# ---------------------------------------------------------------------------
+
+async def _is_member(context: ContextTypes.DEFAULT_TYPE, chat_ref: str, uid: int) -> bool:
+    """Return True if uid is a member of chat_ref. Tolerates errors."""
+    if not chat_ref:
+        return True
+    ref: Any = chat_ref
+    if isinstance(chat_ref, str) and chat_ref.lstrip("-").isdigit():
+        try: ref = int(chat_ref)
+        except Exception: ref = chat_ref
+    try:
+        member = await context.bot.get_chat_member(chat_id=ref, user_id=uid)
+        status = getattr(member, "status", "")
+        return status in {"creator", "administrator", "member", "owner"}
+    except Exception as exc:
+        logger.info("get_chat_member failed for %s: %s", chat_ref, exc)
+        # If the bot is not in the channel, we cannot verify — fail open
+        # so we never permanently lock users out due to misconfiguration.
+        return True
+
+
+async def missing_subscriptions(context: ContextTypes.DEFAULT_TYPE, uid: int) -> List[Dict[str, str]]:
+    if not FORCE_CHANNELS or is_owner(uid):
+        return []
+    pending: List[Dict[str, str]] = []
+    for entry in FORCE_CHANNELS:
+        if not await _is_member(context, entry.get("chat", ""), uid):
+            pending.append(entry)
+    return pending
+
+
+def _join_keyboard(pending: List[Dict[str, str]]) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+    for entry in pending:
+        link = entry.get("link") or ""
+        label = entry.get("button") or f"Join {entry.get('title', 'Channel')}"
+        if link:
+            rows.append([InlineKeyboardButton(label, url=link)])
+    rows.append([InlineKeyboardButton("✓ I have joined", callback_data="fsub:check")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Returns True if user is allowed to proceed. Otherwise sends gate."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if not user or not chat or is_owner(user.id):
+        return True
+    pending = await missing_subscriptions(context, user.id)
+    if not pending:
+        return True
+    text = FORCE_CAPTION
+    markup = _join_keyboard(pending)
+    try:
+        if update.callback_query:
+            await update.callback_query.answer("Membership required.", show_alert=False)
+            await context.bot.send_message(
+                chat_id=chat.id, text=text, reply_markup=markup,
+                parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=chat.id, text=text, reply_markup=markup,
+                parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+            )
+    except Exception:
+        logger.exception("Failed to send subscription gate")
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Force-subscribe channel management (owner)
+# ---------------------------------------------------------------------------
+
+CHANNELS_WAITING: Dict[int, Dict[str, str]] = {}  # owner add-flow scratch
+
+
+def _channels_overview() -> str:
+    if not FORCE_CHANNELS:
+        return ("<b>Required Channels</b>\n  • <i>None configured.</i>\n\n"
+                "Use <code>/addchannel</code> to add one.")
+    lines = ["<b>Required Channels</b>"]
+    for i, c in enumerate(FORCE_CHANNELS, 1):
+        lines.append(
+            f"  <b>{i}.</b> <code>{html.escape(c.get('title', '—'))}</code>\n"
+            f"     · Chat: <code>{html.escape(c.get('chat', ''))}</code>\n"
+            f"     · Link: {html.escape(c.get('link', '—'))}\n"
+            f"     · Button: <code>{html.escape(c.get('button', '—'))}</code>"
+        )
+    lines.append("")
+    lines.append("<b>Gate caption</b>")
+    lines.append(f"<i>{html.escape(FORCE_CAPTION)[:400]}</i>")
+    return "\n".join(lines)
+
+
+async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    await msg.reply_text(
+        _channels_overview()
+        + "\n\nCommands:\n"
+        "<code>/addchannel &lt;@channel_or_id&gt; | &lt;Title&gt; | &lt;https://t.me/...&gt; | &lt;Button label&gt;</code>\n"
+        "<code>/removechannel &lt;index&gt;</code>\n"
+        "<code>/setjoinmsg &lt;text&gt;</code> — update the gate caption (HTML allowed)",
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+    )
+
+
+async def cmd_addchannel(update: Update, context: ContextTypes.DEFAULT_TYPE, args: str) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    parts = [p.strip() for p in args.split("|")]
+    if len(parts) < 3 or not parts[0]:
+        await msg.reply_text(
+            "Usage:\n<code>/addchannel @channel | Title | https://t.me/... | Button label</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    chat_ref = parts[0]
+    title = parts[1] or "Channel"
+    link = parts[2] or ""
+    button = parts[3] if len(parts) >= 4 and parts[3] else f"Join {title}"
+    FORCE_CHANNELS.append({"chat": chat_ref, "title": title, "link": link, "button": button})
+    _save_state()
+    await msg.reply_text(
+        f"✓ Added channel <code>{html.escape(chat_ref)}</code>.\n\n" + _channels_overview(),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+    )
+
+
+async def cmd_removechannel(update: Update, context: ContextTypes.DEFAULT_TYPE, args: str) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    try:
+        idx = int(re.sub(r"\D", "", args)) - 1
+    except Exception:
+        idx = -1
+    if idx < 0 or idx >= len(FORCE_CHANNELS):
+        await msg.reply_text("Provide a valid channel index from <code>/channels</code>.",
+                             parse_mode=ParseMode.HTML)
+        return
+    removed = FORCE_CHANNELS.pop(idx)
+    _save_state()
+    await msg.reply_text(
+        f"✓ Removed <code>{html.escape(removed.get('title', ''))}</code>.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_setjoinmsg(update: Update, context: ContextTypes.DEFAULT_TYPE, args: str) -> None:
+    global FORCE_CAPTION
+    msg = update.effective_message
+    if not msg:
+        return
+    text = args.strip()
+    if not text:
+        await msg.reply_text("Provide caption text after the command.")
+        return
+    FORCE_CAPTION = text
+    _save_state()
+    await msg.reply_text("✓ Gate caption updated.", parse_mode=ParseMode.HTML)
+
+
+# ---------------------------------------------------------------------------
+# Quiz collection (forwarded Telegram polls → PDF)
+# ---------------------------------------------------------------------------
+
+def _clean_quiz_question(text: str, source_title: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Split a possibly multi-line poll question into (question, source_label).
+
+    Heuristic: if the question's first line is short and the next lines
+    contain real text, treat the first line as the source/channel label.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return "", source_title
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if len(lines) >= 2 and len(lines[0]) <= 60:
+        # Looks like "Channel name\nActual question..."
+        return "\n".join(lines[1:]).strip(), lines[0]
+    return raw, source_title
+
+
+async def _refresh_quiz_status(context: ContextTypes.DEFAULT_TYPE, uid: int, chat_id: int) -> None:
+    bucket = USER_QUIZ.get(uid) or []
+    n = len(bucket)
+    if n == 0:
+        text = (
+            "<b>Quiz Collector</b>\n\n"
+            "Forward Telegram quiz polls to me — each one is captured automatically.\n"
+            "When you are ready, run <code>/genquiz</code> to build the PDF."
+        )
+    else:
+        preview_lines = []
+        for i, q in enumerate(bucket[-5:], start=max(1, n - 4)):
+            qt = (q.get("question") or "").splitlines()[0][:64]
+            preview_lines.append(f"  <b>{i}.</b> {html.escape(qt)}")
+        preview = "\n".join(preview_lines)
+        text = (
+            f"<b>Quiz Collector</b> — <code>{n}</code> question(s) captured.\n\n"
+            f"{preview}\n\n"
+            "Forward more polls to add, or run <code>/genquiz</code> to generate the PDF.\n"
+            "Use <code>/quizclear</code> to start over."
+        )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Generate PDF", callback_data="quiz:gen"),
+         InlineKeyboardButton("Clear", callback_data="quiz:clear")],
+    ])
+
+    existing = QUIZ_STATUS_MSG.get(uid)
+    if existing and existing[0] == chat_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=existing[0], message_id=existing[1],
+                text=text, reply_markup=kb,
+                parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+            )
+            return
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                return
+    sent = await context.bot.send_message(
+        chat_id=chat_id, text=text, reply_markup=kb,
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True,
+    )
+    QUIZ_STATUS_MSG[uid] = (sent.chat_id, sent.message_id)
+
+
+async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user or not msg.poll:
+        return
+    if not is_generator(user.id):
+        return
+    if not await enforce_subscription(update, context):
+        return
+
+    poll = msg.poll
+    # Source title (channel name) from forward metadata
+    source_title: Optional[str] = None
+    try:
+        fwd_chat = getattr(msg, "forward_from_chat", None)
+        if fwd_chat:
+            source_title = getattr(fwd_chat, "title", None) or getattr(fwd_chat, "username", None)
+        if not source_title:
+            origin = getattr(msg, "forward_origin", None)
+            if origin:
+                src = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
+                if src:
+                    source_title = getattr(src, "title", None) or getattr(src, "username", None)
+                if not source_title:
+                    source_title = getattr(origin, "sender_user_name", None)
+    except Exception:
+        source_title = None
+
+    question_text, source = _clean_quiz_question(poll.question or "", source_title)
+    options = [opt.text for opt in (poll.options or [])][:4]
+    while len(options) < 4:
+        options.append("")
+
+    # Quiz polls expose correct_option_id and explanation
+    correct_id = getattr(poll, "correct_option_id", None)
+    if correct_id is None:
+        # Try poll.correct_option_id from update.poll? not available here
+        try:
+            correct_id = poll.correct_option_id
+        except Exception:
+            correct_id = None
+    answer_letter = ""
+    if isinstance(correct_id, int) and 0 <= correct_id < 4:
+        answer_letter = "ABCD"[correct_id]
+
+    explanation = getattr(poll, "explanation", "") or ""
+
+    record = {
+        "question": question_text,
+        "option_a": options[0],
+        "option_b": options[1],
+        "option_c": options[2],
+        "option_d": options[3],
+        "answer": answer_letter,
+        "explanation": explanation,
+        "source": source or "",
+    }
+    USER_QUIZ[user.id].append(record)
+    _save_state()
+    track(user, "quiz captured")
+
+    try: await msg.delete()
+    except Exception: pass
+
+    await _refresh_quiz_status(context, user.id, msg.chat_id)
+
+
+async def cmd_quizclear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+    USER_QUIZ.pop(user.id, None)
+    _save_state()
+    await _refresh_quiz_status(context, user.id, msg.chat_id)
+
+
+async def cmd_quizstart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+    QUIZ_STATUS_MSG.pop(user.id, None)
+    await _refresh_quiz_status(context, user.id, msg.chat_id)
+
+
+def _quizzes_to_rows(uid: int) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for q in USER_QUIZ.get(uid, []):
+        text = q.get("question") or ""
+        src = (q.get("source") or "").strip()
+        if src:
+            text = f"<i>[{html.escape(src)}]</i><br>{html.escape(text)}"
+        else:
+            text = html.escape(text)
+        # build_html will run render_inline_math which html-escapes again,
+        # so feed plain text through the normal pipeline instead.
+        row = {
+            "question": q.get("question") or "",
+            "option_a": q.get("option_a") or "",
+            "option_b": q.get("option_b") or "",
+            "option_c": q.get("option_c") or "",
+            "option_d": q.get("option_d") or "",
+            "answer": q.get("answer") or "",
+            "explanation": q.get("explanation") or "",
+            "source": src,
+        }
+        out.append(row)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Front / back page upload
+# ---------------------------------------------------------------------------
+
+def _image_to_pdf_bytes(img_path: Path) -> bytes:
+    """Render an image as a single full-page PDF using WeasyPrint."""
+    src = f"file://{img_path.resolve()}"
+    html_doc = f"""<!doctype html><html><head><style>
+        @page {{ size: A4; margin: 0; }}
+        html, body {{ margin: 0; padding: 0; height: 100%; }}
+        .wrap {{ width: 100%; height: 100vh; display: flex;
+                 align-items: center; justify-content: center; background: #fff; }}
+        img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+    </style></head><body><div class='wrap'>
+        <img src='{src}' alt=''/></div></body></html>"""
+    return HTML(string=html_doc, base_url=str(img_path.parent)).write_pdf()
+
+
+async def _save_front_back(context, doc, target: Path, kind: str) -> str:
+    """Save uploaded PDF or image as a single-page (or multi-page) PDF."""
+    file_name = (doc.file_name or "").lower()
+    mime = (doc.mime_type or "").lower()
+    tg_file = await context.bot.get_file(doc.file_id)
+    raw = bytes(await tg_file.download_as_bytearray())
+    if file_name.endswith(".pdf") or "pdf" in mime:
+        target.write_bytes(raw)
+        return f"{kind.title()} page (PDF) saved."
+    if mime.startswith("image/") or file_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        tmp = target.with_suffix(target.suffix + ".src")
+        tmp.write_bytes(raw)
+        try:
+            pdf_bytes = await asyncio.to_thread(_image_to_pdf_bytes, tmp)
+            target.write_bytes(pdf_bytes)
+        finally:
+            try: tmp.unlink()
+            except Exception: pass
+        return f"{kind.title()} page (image) saved."
+    raise ValueError("Only PDF or image files are accepted for front/back pages.")
+
+
+def _merge_with_front_back(uid: int, body_pdf: bytes) -> bytes:
+    """Prepend front_path and append back_path if present."""
+    fp = front_path(uid)
+    bp = back_path(uid)
+    if not fp.exists() and not bp.exists():
+        return body_pdf
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        logger.exception("pypdf not available; skipping front/back merge")
+        return body_pdf
+    writer = PdfWriter()
+    if fp.exists():
+        for page in PdfReader(str(fp)).pages:
+            writer.add_page(page)
+    for page in PdfReader(io.BytesIO(body_pdf)).pages:
+        writer.add_page(page)
+    if bp.exists():
+        for page in PdfReader(str(bp)).pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+
 # Health server (Render web service)
 # ---------------------------------------------------------------------------
 
@@ -1560,6 +2179,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
 
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
