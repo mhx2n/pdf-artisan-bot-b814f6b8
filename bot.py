@@ -138,7 +138,26 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "columns": 2,
     "page_size": "A4",
     "theme": "green",
+    "bn_font": "Noto Sans Bengali",
+    "en_font": "Inter",
+    "math_font": "STIX Two Math",
 }
+
+# Curated, professional Google Fonts. WeasyPrint will fetch via @import.
+BN_FONTS = [
+    "Noto Sans Bengali", "Hind Siliguri", "Baloo Da 2", "Tiro Bangla",
+    "Atma", "Mina", "Galada", "Anek Bangla", "Noto Serif Bengali",
+]
+EN_FONTS = [
+    "Inter", "Poppins", "Roboto", "Montserrat", "Lato", "Open Sans",
+    "Nunito", "Work Sans", "Manrope", "Source Sans 3", "Merriweather",
+    "Playfair Display", "Raleway", "Rubik", "DM Sans", "Mulish",
+]
+MATH_FONTS = [
+    "STIX Two Math", "STIX Two Text", "Lora", "Source Serif 4",
+    "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Roboto Mono",
+    "Cambay", "Spectral",
+]
 
 DEFAULT_BUTTON_LABELS: Dict[str, str] = {
     "title": "Title",
@@ -161,6 +180,9 @@ DEFAULT_BUTTON_LABELS: Dict[str, str] = {
     "columns": "Columns",
     "page_size": "Page",
     "theme": "Theme",
+    "bn_font": "Bangla Font",
+    "en_font": "English Font",
+    "math_font": "Math Font",
     "reset": "Reset",
     "generate": "Generate PDF",
 }
@@ -398,6 +420,13 @@ def main_keyboard(settings: Dict[str, Any], owner_view: bool) -> InlineKeyboardM
             InlineKeyboardButton(f"{lbl('theme')}: {settings['theme'].title()}", callback_data="cycle:theme"),
         ],
         [
+            InlineKeyboardButton(f"BN: {settings.get('bn_font', 'Noto Sans Bengali')}", callback_data="cycle:bn_font"),
+            InlineKeyboardButton(f"EN: {settings.get('en_font', 'Inter')}", callback_data="cycle:en_font"),
+        ],
+        [
+            InlineKeyboardButton(f"Math: {settings.get('math_font', 'STIX Two Math')}", callback_data="cycle:math_font"),
+        ],
+        [
             InlineKeyboardButton("Front Cover", callback_data="upload:front_page"),
             InlineKeyboardButton("Back Cover", callback_data="upload:back_page"),
             InlineKeyboardButton("Quiz Mode", callback_data="quiz:start"),
@@ -447,6 +476,9 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
     wm_mode = "Image" if settings.get("watermark_image_enabled") and wm_path(user_id).exists() else "Text"
     logo_mode = "Image" if logo_path(user_id).exists() else "Default"
     thumb_mode = "Set" if thumb_path(user_id).exists() else "None"
+    front_mode = "Set" if front_path(user_id).exists() else "None"
+    back_mode = "Set" if back_path(user_id).exists() else "None"
+    quiz_count = len(USER_QUIZ.get(user_id, []))
     body = textwrap.dedent(f"""
     <b>PDF Composer</b>
     <i>Role: {role}</i>
@@ -464,9 +496,14 @@ def panel_text(user_id: int, settings: Dict[str, Any], note: Optional[str] = Non
       • Columns: <code>{settings['columns']}</code> · Page: <code>{settings['page_size']}</code> · Theme: <code>{settings['theme'].title()}</code>
       • Watermark ({wm_mode}): <code>{html.escape(str(settings['watermark_text']))}</code> · Opacity: <code>{settings.get('watermark_opacity', 8)}%</code>
       • Logo: <code>{logo_mode}</code> · Thumbnail: <code>{thumb_mode}</code>
+      • Fonts — BN: <code>{html.escape(str(settings.get('bn_font', '—')))}</code> · EN: <code>{html.escape(str(settings.get('en_font', '—')))}</code> · Math: <code>{html.escape(str(settings.get('math_font', '—')))}</code>
+
+    <b>Covers</b>
+      • Front: <code>{front_mode}</code> · Back: <code>{back_mode}</code>
 
     <b>Source</b>
       • CSV: <code>{html.escape(csv_name)}</code> ({csv_status})
+      • Quiz pool: <code>{quiz_count}</code> question(s)
     """).strip()
     if note:
         body += f"\n\n<b>›</b> <i>{html.escape(note)}</i>"
@@ -1147,6 +1184,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "cycle:theme":
         keys = list(THEMES.keys())
         settings["theme"] = keys[(keys.index(settings.get("theme", "green")) + 1) % len(keys)]
+    elif data in ("cycle:bn_font", "cycle:en_font", "cycle:math_font"):
+        if not is_admin(user.id):
+            try: await query.answer("Administrator only.", show_alert=True)
+            except Exception: pass
+            return
+        field = data.split(":", 1)[1]
+        pool = {"bn_font": BN_FONTS, "en_font": EN_FONTS, "math_font": MATH_FONTS}[field]
+        cur = settings.get(field, pool[0])
+        idx = pool.index(cur) if cur in pool else -1
+        settings[field] = pool[(idx + 1) % len(pool)]
+        note = f"{field.replace('_', ' ').title()} → {settings[field]}"
     elif data == "reset":
         USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy()
         note = "Settings restored to defaults."
@@ -1207,7 +1255,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
-    # Front / back cover upload (admin only)
+    # Front / back cover upload (admin only) — accepts PDF or image documents
     if waiting in {"front_page", "back_page"}:
         if not is_admin(user.id):
             await msg.reply_text("Administrator only.")
@@ -1223,7 +1271,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         try: await msg.delete()
         except Exception: pass
-        await msg.chat.send_message(f"✓ {note}")
+        await send_or_update_panel(update, context, note=note)
         return
 
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
@@ -1235,6 +1283,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = bytes(await tg_file.download_as_bytearray())
     USER_CSV[user.id] = data
     USER_CSV_NAME[user.id] = doc.file_name or "uploaded.csv"
+    # New CSV resets any pending quiz pool
+    USER_QUIZ.pop(user.id, None)
+    stat = QUIZ_STATUS_MSG.pop(user.id, None)
+    if stat:
+        try: await context.bot.delete_message(chat_id=stat[0], message_id=stat[1])
+        except Exception: pass
     _save_state()
 
     try: await msg.delete()
@@ -1254,13 +1308,42 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "logo_image":      (logo_path(user.id), "logo_enabled", "Logo image saved and enabled."),
         "thumbnail_image": (thumb_path(user.id), None, "Thumbnail image saved."),
     }
+    photo = msg.photo[-1] if msg.photo else None
+    if not photo:
+        return
+
+    # Front/back cover via compressed photo
+    if waiting in {"front_page", "back_page"}:
+        if not is_admin(user.id):
+            await msg.reply_text("Administrator only.")
+            return
+        target = front_path(user.id) if waiting == "front_page" else back_path(user.id)
+        kind = "front" if waiting == "front_page" else "back"
+        WAITING_FOR.pop(user.id, None)
+        try:
+            tg_file = await context.bot.get_file(photo.file_id)
+            raw = bytes(await tg_file.download_as_bytearray())
+            tmp = target.with_suffix(target.suffix + ".src")
+            tmp.write_bytes(raw)
+            try:
+                pdf_bytes = await asyncio.to_thread(_image_to_pdf_bytes, tmp)
+                target.write_bytes(pdf_bytes)
+            finally:
+                try: tmp.unlink()
+                except Exception: pass
+        except Exception as exc:
+            await msg.reply_text(f"⚠ Could not save {kind} page: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+            return
+        try: await msg.delete()
+        except Exception: pass
+        await send_or_update_panel(update, context, note=f"{kind.title()} page (image) saved.")
+        return
+
     if waiting not in image_targets:
         return
     if not is_admin(user.id):
         await msg.reply_text("Administrator only.")
-        return
-    photo = msg.photo[-1] if msg.photo else None
-    if not photo:
         return
     target, enable_key, note = image_targets[waiting]
     WAITING_FOR.pop(user.id, None)
@@ -1448,6 +1531,12 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     columns = 2 if int(settings.get("columns", 2)) == 2 else 1
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
+    bn_font = settings.get("bn_font", "Noto Sans Bengali")
+    en_font = settings.get("en_font", "Inter")
+    math_font = settings.get("math_font", "STIX Two Math")
+    bn_font_q = bn_font.replace(" ", "+")
+    en_font_q = en_font.replace(" ", "+")
+    math_font_q = math_font.replace(" ", "+")
     u_wm = wm_path(user_id)
     u_logo = logo_path(user_id)
     use_image_wm = bool(settings.get("watermark_enabled")) and bool(settings.get("watermark_image_enabled")) and u_wm.exists()
@@ -1488,19 +1577,21 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
 <title>{html.escape(settings.get('title', 'PDF'))}</title>
 <style>
   @font-face {{ font-family: 'Noto Sans Bengali'; src: url('fonts/NotoSansBengali-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; }}
+  @import url('https://fonts.googleapis.com/css2?family={en_font_q}:wght@400;600;700;800&family={bn_font_q}:wght@400;600;700&family={math_font_q}:wght@400;700&display=swap');
   @page {{
       size: {size};
       margin: 14mm 12mm 18mm;
       @bottom-center {{ content: element(footer); }}
       @bottom-right {{
           content: "Page " counter(page) " of " counter(pages);
-          font-family: 'DejaVu Sans', sans-serif;
+          font-family: '{en_font}', 'DejaVu Sans', sans-serif;
           font-size: 8.5pt; color: #6b7280;
           padding-bottom: 4mm;
       }}
   }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: 'Noto Sans Bengali', 'DejaVu Sans', 'Helvetica', sans-serif; color: #111827; line-height: 1.5; font-size: 10.5pt; margin: 0; }}
+  body {{ font-family: '{bn_font}', '{en_font}', 'Noto Sans Bengali', 'DejaVu Sans', sans-serif; color: #111827; line-height: 1.55; font-size: 10.5pt; margin: 0; }}
+  .math, sup, sub, .frac {{ font-family: '{math_font}', '{en_font}', 'DejaVu Sans', serif; }}
   table {{ border-collapse: collapse; width: 100%; }}
 
   .header {{ width: 100%; border: 1.5px solid {theme['primary']}; border-radius: 8px; background: {theme['light']}; margin-bottom: 12px; }}
@@ -1677,14 +1768,9 @@ async def generate_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 thumbnail=thumb,
             )
             GENERATION_COUNT += 1
-            # If we generated from quizzes, clear the pool and the live status card.
-            if quiz_rows and not csv_data:
-                USER_QUIZ.pop(user.id, None)
-                _save_state()
-                stat = QUIZ_STATUS_MSG.pop(user.id, None)
-                if stat:
-                    try: await context.bot.delete_message(chat_id=stat[0], message_id=stat[1])
-                    except Exception: pass
+            # Quiz pool is preserved across generations; only /quizclear or
+            # uploading a new CSV resets it. The user can keep generating
+            # PDFs from the same collected quizzes as many times as needed.
         except Exception as exc:
             stop_flag["v"] = True
             anim_task.cancel()
