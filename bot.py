@@ -805,9 +805,10 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         "addadmin", "removeadmin",
         "addgen", "removegen",
         "allow", "deny", "promote", "demote",
+        "channels", "addchannel", "removechannel", "setjoinmsg",
     }
     alias_map = {
-        "users": "users",      # combined listing
+        "users": "users",
         "allow": "addgen",
         "deny": "removegen",
         "promote": "addadmin",
@@ -833,21 +834,66 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 + _format_id_list(GENERATOR_IDS, "Generator Users")
             )
             await msg.reply_text(text, parse_mode=ParseMode.HTML)
+        elif cmd == "channels":
+            await cmd_channels(update, context)
+        elif cmd == "addchannel":
+            await cmd_addchannel(update, context, args)
+        elif cmd == "removechannel":
+            await cmd_removechannel(update, context, args)
+        elif cmd == "setjoinmsg":
+            await cmd_setjoinmsg(update, context, args)
         else:
             real = alias_map.get(cmd, cmd)
             await handle_role_command(real, args, update, context)
         return True
 
+    # Admin-only commands (front / back page management)
+    admin_cmds = {"frontpage", "backpage", "removefront", "removeback"}
+    if cmd in admin_cmds:
+        if not is_admin(user.id):
+            await msg.reply_text("This command is restricted to administrators.")
+            return True
+        if not await enforce_subscription(update, context):
+            return True
+        if cmd == "frontpage":
+            WAITING_FOR[user.id] = "front_page"
+            await msg.reply_text(
+                "Send the <b>front cover</b> as a PDF or image. It will be inserted "
+                "as the first page(s) of every generated PDF.",
+                parse_mode=ParseMode.HTML,
+            )
+        elif cmd == "backpage":
+            WAITING_FOR[user.id] = "back_page"
+            await msg.reply_text(
+                "Send the <b>back cover</b> as a PDF or image. It will be appended "
+                "as the final page(s) of every generated PDF.",
+                parse_mode=ParseMode.HTML,
+            )
+        elif cmd == "removefront":
+            try: front_path(user.id).unlink()
+            except FileNotFoundError: pass
+            await msg.reply_text("✓ Front cover removed.")
+        elif cmd == "removeback":
+            try: back_path(user.id).unlink()
+            except FileNotFoundError: pass
+            await msg.reply_text("✓ Back cover removed.")
+        return True
+
     # Generator-or-better commands
-    gen_cmds = {"panel", "menu", "generate", "reset", "status", "clear"}
+    gen_cmds = {
+        "panel", "menu", "generate", "reset", "status", "clear",
+        "quiz", "quizclear", "genquiz",
+    }
     if cmd in gen_cmds:
         if not is_generator(user.id):
             await msg.reply_text("This command is not available for your account.")
             return True
+        if not await enforce_subscription(update, context):
+            return True
         if cmd in {"panel", "menu"}:
             PANEL_MSG.pop(user.id, None)
             await send_or_update_panel(update, context)
-        elif cmd == "generate":
+        elif cmd == "generate" or cmd == "genquiz":
             await generate_for_user(update, context)
         elif cmd == "reset":
             USER_SETTINGS[user.id] = DEFAULT_SETTINGS.copy(); _save_state()
@@ -857,6 +903,10 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         elif cmd == "clear":
             USER_CSV.pop(user.id, None); USER_CSV_NAME.pop(user.id, None); _save_state()
             await send_or_update_panel(update, context, note="CSV cleared.")
+        elif cmd == "quiz":
+            await cmd_quizstart(update, context)
+        elif cmd == "quizclear":
+            await cmd_quizclear(update, context)
         return True
 
     await msg.reply_text("Unknown command.")
