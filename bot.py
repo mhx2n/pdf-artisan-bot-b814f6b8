@@ -577,6 +577,21 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel")]])
 
 
+def theme_picker_keyboard(current: str) -> InlineKeyboardMarkup:
+    keys = list(THEMES.keys())
+    rows: List[List[InlineKeyboardButton]] = []
+    for i in range(0, len(keys), 3):
+        chunk = keys[i:i + 3]
+        rows.append([
+            InlineKeyboardButton(
+                ("● " if k == current else "○ ") + k.title(),
+                callback_data=f"pick:theme:{k}",
+            ) for k in chunk
+        ])
+    rows.append([InlineKeyboardButton("← Back to Panel", callback_data="view:panel")])
+    return InlineKeyboardMarkup(rows)
+
+
 def buttons_editor_keyboard() -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
     keys = list(DEFAULT_BUTTON_LABELS.keys())
