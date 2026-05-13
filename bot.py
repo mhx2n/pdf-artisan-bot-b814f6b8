@@ -1884,8 +1884,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .header .subtitle {{ margin-top: 2px; color: #374151; font-size: 10.5pt; }}
   .header .meta {{ text-align: right; font-weight: 700; white-space: nowrap; width: 1%; font-size: 10pt; line-height: 1.5; }}
 
-  .paper {{ column-count: {columns}; column-gap: 8mm; column-rule: none; column-fill: balance; text-align: justify; text-justify: inter-word; hyphens: auto; }}
-  .question {{ break-inside: avoid; page-break-inside: avoid; padding: 10px 12px; margin-bottom: 10px; background: #ffffff; border: 1px solid {theme['border']}; border-radius: 8px; overflow: hidden; }}
+  .paper {{ column-count: {columns}; column-gap: 8mm; column-rule: none; column-fill: balance; text-align: justify; text-justify: inter-word; hyphens: auto; position: relative; z-index: 1; }}
+  .question {{ break-inside: avoid; page-break-inside: avoid; padding: 10px 12px; margin-bottom: 10px; background: rgba(255,255,255,0.78); border: 1px solid {theme['border']}; border-radius: 8px; overflow: hidden; position: relative; z-index: 1; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
   td.q-no {{ width: 40px; vertical-align: top; padding: 0 8px 0 0; }}
