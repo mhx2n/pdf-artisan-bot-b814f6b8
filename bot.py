@@ -1526,11 +1526,30 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_pdf = file_name.endswith(".pdf") or "pdf" in mime
     if is_pdf and is_admin(user.id):
         await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+        progress = None
+        try:
+            progress = await msg.reply_text("⟳ Processing PDF… downloading.")
+        except Exception:
+            progress = None
+
+        async def _set_progress(text: str) -> None:
+            if not progress:
+                return
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=progress.chat_id, message_id=progress.message_id,
+                    text=text, parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+
         try:
             tg_file = await context.bot.get_file(doc.file_id)
             raw = bytes(await tg_file.download_as_bytearray())
+            await _set_progress("⟳ Generating PDF… applying front/back covers.")
             asset_uid = effective_asset_uid(user.id)
             merged = await asyncio.to_thread(_merge_with_front_back, asset_uid, raw)
+            await _set_progress("⟳ Generating PDF… uploading result.")
             out_name = re.sub(r"\.pdf$", "", doc.file_name or "document", flags=re.IGNORECASE) + "_wrapped.pdf"
             bio = io.BytesIO(merged)
             bio.name = out_name
@@ -1541,19 +1560,44 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
                 except Exception:
                     thumb = None
-            await context.bot.send_document(
-                chat_id=msg.chat.id,
-                document=InputFile(bio, filename=out_name),
-                filename=out_name,
-                thumbnail=thumb,
-                caption="✓ Front/back covers applied to your PDF.",
-            )
+            last_err: Optional[Exception] = None
+            for attempt in range(3):
+                try:
+                    bio.seek(0)
+                    await context.bot.send_document(
+                        chat_id=msg.chat.id,
+                        document=InputFile(bio, filename=out_name),
+                        filename=out_name,
+                        thumbnail=thumb,
+                        caption="✓ Front/back covers applied to your PDF.",
+                        read_timeout=300, write_timeout=300, connect_timeout=60, pool_timeout=60,
+                    )
+                    last_err = None
+                    break
+                except Exception as send_exc:
+                    last_err = send_exc
+                    logger.warning("send_document attempt %s failed: %s", attempt + 1, send_exc)
+                    await asyncio.sleep(2.0 * (attempt + 1))
+            if last_err is not None:
+                raise last_err
+            if progress:
+                try: await context.bot.delete_message(chat_id=progress.chat_id, message_id=progress.message_id)
+                except Exception: pass
             try: await msg.delete()
             except Exception: pass
         except Exception as exc:
             logger.exception("PDF wrap failed")
-            await msg.reply_text(f"⚠ Could not process PDF: {html.escape(str(exc))}",
-                                 parse_mode=ParseMode.HTML)
+            err_text = f"⚠ Could not process PDF: {html.escape(type(exc).__name__)}: {html.escape(str(exc) or 'no detail')}"
+            if progress:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=progress.chat_id, message_id=progress.message_id,
+                        text=err_text, parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    await msg.reply_text(err_text, parse_mode=ParseMode.HTML)
+            else:
+                await msg.reply_text(err_text, parse_mode=ParseMode.HTML)
         return
 
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
@@ -1951,9 +1995,12 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .frac span:last-child {{ padding-top: 1px; }}
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
-  .watermark {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 78pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; transform: rotate(-28deg); pointer-events: none; z-index: 0; }}
-  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
-  .watermark-img img {{ width: 130mm; max-width: 80%; max-height: 70%; height: auto; }}
+  /* Watermark — centered exactly on the physical page (negative offsets
+     compensate for asymmetric @page margins so it sits at true paper center,
+     not the content-area center). Text watermark is straight (no rotation). */
+  .watermark {{ position: fixed; top: -14mm; left: -12mm; right: -12mm; bottom: -18mm; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 72pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; pointer-events: none; z-index: 0; }}
+  .watermark-img {{ position: fixed; top: -14mm; left: -12mm; right: -12mm; bottom: -18mm; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
+  .watermark-img img {{ width: 120mm; max-width: 70%; max-height: 60%; height: auto; object-fit: contain; display: block; margin: auto; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 
