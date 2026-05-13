@@ -1951,9 +1951,12 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .frac span:last-child {{ padding-top: 1px; }}
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
-  .watermark {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 78pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; transform: rotate(-28deg); pointer-events: none; z-index: 0; }}
-  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
-  .watermark-img img {{ width: 130mm; max-width: 80%; max-height: 70%; height: auto; }}
+  /* Watermark — centered exactly on the physical page (negative offsets
+     compensate for asymmetric @page margins so it sits at true paper center,
+     not the content-area center). Text watermark is straight (no rotation). */
+  .watermark {{ position: fixed; top: -14mm; left: -12mm; right: -12mm; bottom: -18mm; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 72pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; pointer-events: none; z-index: 0; }}
+  .watermark-img {{ position: fixed; top: -14mm; left: -12mm; right: -12mm; bottom: -18mm; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
+  .watermark-img img {{ width: 120mm; max-width: 70%; max-height: 60%; height: auto; object-fit: contain; display: block; margin: auto; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 
