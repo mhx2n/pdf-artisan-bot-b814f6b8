@@ -155,7 +155,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "footer_link": "https://t.me/",
     "watermark_enabled": True,
     "watermark_text": "CONFIDENTIAL",
-    "watermark_opacity": 8,
+    "watermark_opacity": 15,
     "watermark_image_enabled": False,
     "logo_enabled": True,
     "answer_enabled": True,
@@ -1522,6 +1522,40 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
+    # Owner/admin PDF upload — wrap with configured front/back covers and return.
+    is_pdf = file_name.endswith(".pdf") or "pdf" in mime
+    if is_pdf and is_admin(user.id):
+        await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+        try:
+            tg_file = await context.bot.get_file(doc.file_id)
+            raw = bytes(await tg_file.download_as_bytearray())
+            asset_uid = effective_asset_uid(user.id)
+            merged = await asyncio.to_thread(_merge_with_front_back, asset_uid, raw)
+            out_name = re.sub(r"\.pdf$", "", doc.file_name or "document", flags=re.IGNORECASE) + "_wrapped.pdf"
+            bio = io.BytesIO(merged)
+            bio.name = out_name
+            thumb = None
+            tpath = thumb_path(asset_uid)
+            if tpath.exists() and tpath.stat().st_size > 0:
+                try:
+                    thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
+                except Exception:
+                    thumb = None
+            await context.bot.send_document(
+                chat_id=msg.chat.id,
+                document=InputFile(bio, filename=out_name),
+                filename=out_name,
+                thumbnail=thumb,
+                caption="✓ Front/back covers applied to your PDF.",
+            )
+            try: await msg.delete()
+            except Exception: pass
+        except Exception as exc:
+            logger.exception("PDF wrap failed")
+            await msg.reply_text(f"⚠ Could not process PDF: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+        return
+
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
         await msg.reply_text("Only .csv files are accepted (or use /frontpage / /backpage for cover uploads).")
         return
@@ -1795,7 +1829,10 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     readable = is_readable_mode(col_mode)
     body_class = "readable" if readable else "compact"
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
-    opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
+    opacity = max(0, min(100, int(settings.get("watermark_opacity", 15)))) / 100.0
+    # Ensure watermark is actually visible when enabled (floor at 8%)
+    if opacity > 0 and opacity < 0.08:
+        opacity = 0.08
     bn_font = settings.get("bn_font", "Noto Sans Bengali")
     en_font = settings.get("en_font", "Inter")
     math_font = settings.get("math_font", "STIX Two Math")
@@ -1884,8 +1921,8 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .header .subtitle {{ margin-top: 2px; color: #374151; font-size: 10.5pt; }}
   .header .meta {{ text-align: right; font-weight: 700; white-space: nowrap; width: 1%; font-size: 10pt; line-height: 1.5; }}
 
-  .paper {{ column-count: {columns}; column-gap: 8mm; column-rule: none; column-fill: balance; text-align: justify; text-justify: inter-word; hyphens: auto; }}
-  .question {{ break-inside: avoid; page-break-inside: avoid; padding: 10px 12px; margin-bottom: 10px; background: #ffffff; border: 1px solid {theme['border']}; border-radius: 8px; overflow: hidden; }}
+  .paper {{ column-count: {columns}; column-gap: 8mm; column-rule: none; column-fill: balance; text-align: justify; text-justify: inter-word; hyphens: auto; position: relative; z-index: 1; }}
+  .question {{ break-inside: avoid; page-break-inside: avoid; padding: 10px 12px; margin-bottom: 10px; background: rgba(255,255,255,0.78); border: 1px solid {theme['border']}; border-radius: 8px; overflow: hidden; position: relative; z-index: 1; }}
 
   table.q-head {{ table-layout: fixed; margin-bottom: 4px; }}
   td.q-no {{ width: 40px; vertical-align: top; padding: 0 8px 0 0; }}
@@ -1914,9 +1951,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .frac span:last-child {{ padding-top: 1px; }}
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
-  .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
-  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; }}
-  .watermark-img img {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; margin: auto; width: 110mm; height: auto; max-width: 70%; max-height: 60%; }}
+  .watermark {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 78pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; transform: rotate(-28deg); pointer-events: none; z-index: 0; }}
+  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
+  .watermark-img img {{ width: 130mm; max-width: 80%; max-height: 70%; height: auto; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 
