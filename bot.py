@@ -155,7 +155,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "footer_link": "https://t.me/",
     "watermark_enabled": True,
     "watermark_text": "CONFIDENTIAL",
-    "watermark_opacity": 8,
+    "watermark_opacity": 15,
     "watermark_image_enabled": False,
     "logo_enabled": True,
     "answer_enabled": True,
