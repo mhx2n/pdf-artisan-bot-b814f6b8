@@ -1522,6 +1522,40 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await send_or_update_panel(update, context, note=note)
         return
 
+    # Owner/admin PDF upload — wrap with configured front/back covers and return.
+    is_pdf = file_name.endswith(".pdf") or "pdf" in mime
+    if is_pdf and is_admin(user.id):
+        await msg.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+        try:
+            tg_file = await context.bot.get_file(doc.file_id)
+            raw = bytes(await tg_file.download_as_bytearray())
+            asset_uid = effective_asset_uid(user.id)
+            merged = await asyncio.to_thread(_merge_with_front_back, asset_uid, raw)
+            out_name = re.sub(r"\.pdf$", "", doc.file_name or "document", flags=re.IGNORECASE) + "_wrapped.pdf"
+            bio = io.BytesIO(merged)
+            bio.name = out_name
+            thumb = None
+            tpath = thumb_path(asset_uid)
+            if tpath.exists() and tpath.stat().st_size > 0:
+                try:
+                    thumb = InputFile(io.BytesIO(tpath.read_bytes()), filename="thumb.jpg")
+                except Exception:
+                    thumb = None
+            await context.bot.send_document(
+                chat_id=msg.chat.id,
+                document=InputFile(bio, filename=out_name),
+                filename=out_name,
+                thumbnail=thumb,
+                caption="✓ Front/back covers applied to your PDF.",
+            )
+            try: await msg.delete()
+            except Exception: pass
+        except Exception as exc:
+            logger.exception("PDF wrap failed")
+            await msg.reply_text(f"⚠ Could not process PDF: {html.escape(str(exc))}",
+                                 parse_mode=ParseMode.HTML)
+        return
+
     if not (file_name.endswith(".csv") or "csv" in mime or mime in {"text/plain", "application/vnd.ms-excel"}):
         await msg.reply_text("Only .csv files are accepted (or use /frontpage / /backpage for cover uploads).")
         return
