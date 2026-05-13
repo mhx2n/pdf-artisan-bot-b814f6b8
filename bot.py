@@ -1914,9 +1914,9 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
   .frac span:last-child {{ padding-top: 1px; }}
   sup, sub {{ font-size: 70%; line-height: 0; }}
 
-  .watermark {{ position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 64pt; color: #0f172a; font-weight: 900; z-index: -1; letter-spacing: 4px; }}
-  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: -1; }}
-  .watermark-img img {{ position: absolute; top: 0; left: 0; right: 0; bottom: 0; margin: auto; width: 110mm; height: auto; max-width: 70%; max-height: 60%; }}
+  .watermark {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 78pt; color: {theme['primary']}; font-weight: 900; letter-spacing: 6px; transform: rotate(-28deg); pointer-events: none; z-index: 0; }}
+  .watermark-img {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }}
+  .watermark-img img {{ width: 130mm; max-width: 80%; max-height: 70%; height: auto; }}
   .footer {{ position: running(footer); font-size: 8.5pt; color: #4b5563; text-align: center; border-top: 0.5px solid #d1d5db; padding-top: 4px; }}
   .footer a {{ color: {theme['primary']}; text-decoration: none; }}
 
