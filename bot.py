@@ -1795,7 +1795,10 @@ def build_html(rows: List[Dict[str, str]], settings: Dict[str, Any], user_id: in
     readable = is_readable_mode(col_mode)
     body_class = "readable" if readable else "compact"
     size = "Letter" if settings.get("page_size") == "Letter" else "A4"
-    opacity = max(0, min(100, int(settings.get("watermark_opacity", 8)))) / 100.0
+    opacity = max(0, min(100, int(settings.get("watermark_opacity", 15)))) / 100.0
+    # Ensure watermark is actually visible when enabled (floor at 8%)
+    if opacity > 0 and opacity < 0.08:
+        opacity = 0.08
     bn_font = settings.get("bn_font", "Noto Sans Bengali")
     en_font = settings.get("en_font", "Inter")
     math_font = settings.get("math_font", "STIX Two Math")
