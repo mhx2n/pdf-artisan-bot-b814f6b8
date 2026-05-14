@@ -419,6 +419,9 @@ def _load_state() -> None:
         cap = payload.get("force_caption")
         if isinstance(cap, str) and cap.strip():
             FORCE_CAPTION = cap
+        for uid in payload.get("known_users") or []:
+            try: KNOWN_USERS.add(int(uid))
+            except Exception: pass
         logger.info("State restored from %s", STATE_PATH)
     except Exception:
         logger.exception("Failed to load state")
