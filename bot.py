@@ -1149,6 +1149,27 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             try: back_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Back cover removed.")
+        elif cmd == "broadcast":
+            # If text was passed inline (`/broadcast hello world`) — treat that as the broadcast.
+            inline = " ".join(args).strip()
+            if inline:
+                await _start_broadcast_from_text(update, context, inline)
+            else:
+                WAITING_FOR[user.id] = "broadcast"
+                await msg.reply_text(
+                    "<b>Broadcast mode</b>\n\n"
+                    "Send the next message (text, photo, video, document, sticker, poll, "
+                    "voice — anything) and it will be forwarded to every known user.\n\n"
+                    f"Recipients: <b>{len(KNOWN_USERS)}</b>\n"
+                    "Send /cancelbroadcast to abort.",
+                    parse_mode=ParseMode.HTML,
+                )
+        elif cmd == "cancelbroadcast":
+            if WAITING_FOR.get(user.id) == "broadcast":
+                WAITING_FOR.pop(user.id, None)
+                await msg.reply_text("Broadcast cancelled.")
+            else:
+                await msg.reply_text("No broadcast pending.")
         return True
 
     # Generator-or-better commands
