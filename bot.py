@@ -310,6 +310,13 @@ ADMIN_IDS: Set[int] = set()       # full composer access
 GENERATOR_IDS: Set[int] = set()   # generate-only access
 USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# All users who have ever interacted with the bot in a private chat.
+# Used as the recipient list for broadcasts.
+KNOWN_USERS: Set[int] = set()
+# uid -> {"success": int, "failed": int, "blocked": int, "total": int,
+#         "started": float, "report_chat": int, "report_msg": int}
+BROADCAST_STATS: Dict[int, Dict[str, Any]] = {}
+
 # Owners currently editing the shared User Template profile via the panel.
 EDIT_TEMPLATE: Set[int] = set()
 
