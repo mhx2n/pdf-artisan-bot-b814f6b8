@@ -1335,6 +1335,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not msg or not user:
         return
 
+    # Broadcast intake — admin sent the message after /broadcast.
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        text_in = (msg.text or "").strip()
+        if text_in.lower().lstrip("/.").startswith("cancelbroadcast"):
+            WAITING_FOR.pop(user.id, None)
+            await msg.reply_text("Broadcast cancelled.")
+            return
+        if text_in and not text_in.startswith(("/", ".")):
+            WAITING_FOR.pop(user.id, None)
+            await _start_broadcast_from_message(update, context)
+            return
+
     # PDF rename via reply
     if (
         msg.reply_to_message
