@@ -529,6 +529,110 @@ def track(user, action: str) -> None:
             except Exception: pass
 
 
+# ---------------------------------------------------------------------------
+# Broadcasting
+# ---------------------------------------------------------------------------
+
+async def _do_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    sender_uid: int,
+    src_chat_id: int,
+    src_message_id: int,
+    report_chat: int,
+    report_msg: int,
+) -> None:
+    recipients = [uid for uid in list(KNOWN_USERS) if uid != sender_uid]
+    total = len(recipients)
+    success = failed = blocked = 0
+    started = time.time()
+
+    async def _update(text: str) -> None:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=report_chat, message_id=report_msg,
+                text=text, parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
+    await _update(
+        f"<b>Broadcasting…</b>\n\n"
+        f"Recipients: <b>{total}</b>\n"
+        f"Sent: 0  ·  Failed: 0  ·  Blocked: 0"
+    )
+
+    last_tick = 0.0
+    for idx, uid in enumerate(recipients, 1):
+        try:
+            await context.bot.copy_message(
+                chat_id=uid, from_chat_id=src_chat_id, message_id=src_message_id,
+            )
+            success += 1
+        except Exception as exc:
+            msg_l = str(exc).lower()
+            if ("blocked" in msg_l or "deactivated" in msg_l
+                    or "chat not found" in msg_l or "forbidden" in msg_l):
+                blocked += 1
+            else:
+                failed += 1
+            logger.info("broadcast: %s -> %s", uid, exc)
+        await asyncio.sleep(0.05)
+        now = time.time()
+        if now - last_tick >= 2.0:
+            last_tick = now
+            await _update(
+                f"<b>Broadcasting…</b>\n\n"
+                f"Progress: <b>{idx}/{total}</b>\n"
+                f"Sent: {success}  ·  Failed: {failed}  ·  Blocked: {blocked}"
+            )
+
+    elapsed = time.time() - started
+    await _update(
+        "<b>Broadcast complete</b>\n\n"
+        f"Total recipients: <b>{total}</b>\n"
+        f"✓ Delivered: <b>{success}</b>\n"
+        f"⛔ Blocked / unreachable: <b>{blocked}</b>\n"
+        f"✗ Failed: <b>{failed}</b>\n"
+        f"⏱ Duration: {elapsed:.1f}s"
+    )
+    BROADCAST_STATS.pop(sender_uid, None)
+
+
+async def _start_broadcast_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    WAITING_FOR.pop(user.id, None)
+    try:
+        report = await msg.reply_text("<b>Preparing broadcast…</b>", parse_mode=ParseMode.HTML)
+    except Exception:
+        return
+    BROADCAST_STATS[user.id] = {"started": time.time()}
+    asyncio.create_task(_do_broadcast(
+        context, user.id, msg.chat_id, msg.message_id, report.chat_id, report.message_id,
+    ))
+
+
+async def _start_broadcast_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    try:
+        sent = await context.bot.send_message(
+            chat_id=msg.chat_id, text=text, parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        sent = await context.bot.send_message(chat_id=msg.chat_id, text=text)
+    report = await msg.reply_text("<b>Preparing broadcast…</b>", parse_mode=ParseMode.HTML)
+    BROADCAST_STATS[user.id] = {"started": time.time()}
+    asyncio.create_task(_do_broadcast(
+        context, user.id, sent.chat_id, sent.message_id, report.chat_id, report.message_id,
+    ))
+
+
 def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = False, template_mode: bool = False) -> InlineKeyboardMarkup:
     def flag(key: str) -> str:
         return "ON" if settings.get(key) else "OFF"
