@@ -518,6 +518,11 @@ def track(user, action: str) -> None:
         "last_action": action,
         "last_seen": time.time(),
     }
+    if not user.is_bot:
+        if user.id not in KNOWN_USERS:
+            KNOWN_USERS.add(user.id)
+            try: _save_state()
+            except Exception: pass
 
 
 def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = False, template_mode: bool = False) -> InlineKeyboardMarkup:
