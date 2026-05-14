@@ -1792,6 +1792,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     if not msg or not user or not is_generator(user.id):
         return
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+        return
     waiting = WAITING_FOR.get(user.id, "")
     tgt = panel_target_uid(user.id)
     image_targets = {
