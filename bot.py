@@ -310,6 +310,13 @@ ADMIN_IDS: Set[int] = set()       # full composer access
 GENERATOR_IDS: Set[int] = set()   # generate-only access
 USER_LOCKS: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# All users who have ever interacted with the bot in a private chat.
+# Used as the recipient list for broadcasts.
+KNOWN_USERS: Set[int] = set()
+# uid -> {"success": int, "failed": int, "blocked": int, "total": int,
+#         "started": float, "report_chat": int, "report_msg": int}
+BROADCAST_STATS: Dict[int, Dict[str, Any]] = {}
+
 # Owners currently editing the shared User Template profile via the panel.
 EDIT_TEMPLATE: Set[int] = set()
 
@@ -362,6 +369,7 @@ def _save_state() -> None:
             "user_quiz": {str(k): v for k, v in USER_QUIZ.items() if v},
             "force_channels": FORCE_CHANNELS,
             "force_caption": FORCE_CAPTION,
+            "known_users": list(KNOWN_USERS),
         }
         STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
@@ -411,6 +419,9 @@ def _load_state() -> None:
         cap = payload.get("force_caption")
         if isinstance(cap, str) and cap.strip():
             FORCE_CAPTION = cap
+        for uid in payload.get("known_users") or []:
+            try: KNOWN_USERS.add(int(uid))
+            except Exception: pass
         logger.info("State restored from %s", STATE_PATH)
     except Exception:
         logger.exception("Failed to load state")
@@ -511,6 +522,115 @@ def track(user, action: str) -> None:
         "last_action": action,
         "last_seen": time.time(),
     }
+    if not user.is_bot:
+        if user.id not in KNOWN_USERS:
+            KNOWN_USERS.add(user.id)
+            try: _save_state()
+            except Exception: pass
+
+
+# ---------------------------------------------------------------------------
+# Broadcasting
+# ---------------------------------------------------------------------------
+
+async def _do_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    sender_uid: int,
+    src_chat_id: int,
+    src_message_id: int,
+    report_chat: int,
+    report_msg: int,
+) -> None:
+    recipients = [uid for uid in list(KNOWN_USERS) if uid != sender_uid]
+    total = len(recipients)
+    success = failed = blocked = 0
+    started = time.time()
+
+    async def _update(text: str) -> None:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=report_chat, message_id=report_msg,
+                text=text, parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
+    await _update(
+        f"<b>Broadcasting…</b>\n\n"
+        f"Recipients: <b>{total}</b>\n"
+        f"Sent: 0  ·  Failed: 0  ·  Blocked: 0"
+    )
+
+    last_tick = 0.0
+    for idx, uid in enumerate(recipients, 1):
+        try:
+            await context.bot.copy_message(
+                chat_id=uid, from_chat_id=src_chat_id, message_id=src_message_id,
+            )
+            success += 1
+        except Exception as exc:
+            msg_l = str(exc).lower()
+            if ("blocked" in msg_l or "deactivated" in msg_l
+                    or "chat not found" in msg_l or "forbidden" in msg_l):
+                blocked += 1
+            else:
+                failed += 1
+            logger.info("broadcast: %s -> %s", uid, exc)
+        await asyncio.sleep(0.05)
+        now = time.time()
+        if now - last_tick >= 2.0:
+            last_tick = now
+            await _update(
+                f"<b>Broadcasting…</b>\n\n"
+                f"Progress: <b>{idx}/{total}</b>\n"
+                f"Sent: {success}  ·  Failed: {failed}  ·  Blocked: {blocked}"
+            )
+
+    elapsed = time.time() - started
+    await _update(
+        "<b>Broadcast complete</b>\n\n"
+        f"Total recipients: <b>{total}</b>\n"
+        f"✓ Delivered: <b>{success}</b>\n"
+        f"⛔ Blocked / unreachable: <b>{blocked}</b>\n"
+        f"✗ Failed: <b>{failed}</b>\n"
+        f"⏱ Duration: {elapsed:.1f}s"
+    )
+    BROADCAST_STATS.pop(sender_uid, None)
+
+
+async def _start_broadcast_from_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    WAITING_FOR.pop(user.id, None)
+    try:
+        report = await msg.reply_text("<b>Preparing broadcast…</b>", parse_mode=ParseMode.HTML)
+    except Exception:
+        return
+    BROADCAST_STATS[user.id] = {"started": time.time()}
+    asyncio.create_task(_do_broadcast(
+        context, user.id, msg.chat_id, msg.message_id, report.chat_id, report.message_id,
+    ))
+
+
+async def _start_broadcast_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    try:
+        sent = await context.bot.send_message(
+            chat_id=msg.chat_id, text=text, parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        sent = await context.bot.send_message(chat_id=msg.chat_id, text=text)
+    report = await msg.reply_text("<b>Preparing broadcast…</b>", parse_mode=ParseMode.HTML)
+    BROADCAST_STATS[user.id] = {"started": time.time()}
+    asyncio.create_task(_do_broadcast(
+        context, user.id, sent.chat_id, sent.message_id, report.chat_id, report.message_id,
+    ))
 
 
 def main_keyboard(settings: Dict[str, Any], owner_view: bool, owner: bool = False, template_mode: bool = False) -> InlineKeyboardMarkup:
@@ -749,6 +869,11 @@ def help_text(user_id: int) -> str:
         <code>/addchannel @ch | Title | https://t.me/ch | Button</code>
         <code>/removechannel &lt;index&gt;</code>
         <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption (use <code>{user_id}</code> placeholder)
+
+        <b>Broadcasting</b>
+        <code>/broadcast</code> — Then send any message (text/photo/video/doc/sticker/poll) to forward it to every known user
+        <code>/broadcast &lt;text&gt;</code> — Inline text broadcast
+        <code>/cancelbroadcast</code> — Abort a pending broadcast
 
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
@@ -1102,8 +1227,9 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await handle_role_command(real, args, update, context)
         return True
 
-    # Admin-only commands (front / back page management)
-    admin_cmds = {"frontpage", "backpage", "removefront", "removeback"}
+    # Admin-only commands (front / back page management + broadcast)
+    admin_cmds = {"frontpage", "backpage", "removefront", "removeback",
+                  "broadcast", "cancelbroadcast"}
     if cmd in admin_cmds:
         if not is_admin(user.id):
             await msg.reply_text("This command is restricted to administrators.")
@@ -1132,6 +1258,27 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             try: back_path(panel_target_uid(user.id)).unlink()
             except FileNotFoundError: pass
             await msg.reply_text("✓ Back cover removed.")
+        elif cmd == "broadcast":
+            # If text was passed inline (`/broadcast hello world`) — treat that as the broadcast.
+            inline = " ".join(args).strip()
+            if inline:
+                await _start_broadcast_from_text(update, context, inline)
+            else:
+                WAITING_FOR[user.id] = "broadcast"
+                await msg.reply_text(
+                    "<b>Broadcast mode</b>\n\n"
+                    "Send the next message (text, photo, video, document, sticker, poll, "
+                    "voice — anything) and it will be forwarded to every known user.\n\n"
+                    f"Recipients: <b>{len(KNOWN_USERS)}</b>\n"
+                    "Send /cancelbroadcast to abort.",
+                    parse_mode=ParseMode.HTML,
+                )
+        elif cmd == "cancelbroadcast":
+            if WAITING_FOR.get(user.id) == "broadcast":
+                WAITING_FOR.pop(user.id, None)
+                await msg.reply_text("Broadcast cancelled.")
+            else:
+                await msg.reply_text("No broadcast pending.")
         return True
 
     # Generator-or-better commands
@@ -1193,6 +1340,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not msg or not user:
         return
 
+    # Broadcast intake — admin sent the message after /broadcast.
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        text_in = (msg.text or "").strip()
+        if text_in.lower().lstrip("/.").startswith("cancelbroadcast"):
+            WAITING_FOR.pop(user.id, None)
+            await msg.reply_text("Broadcast cancelled.")
+            return
+        if text_in and not text_in.startswith(("/", ".")):
+            WAITING_FOR.pop(user.id, None)
+            await _start_broadcast_from_message(update, context)
+            return
+
     # PDF rename via reply
     if (
         msg.reply_to_message
@@ -1250,6 +1409,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
+        return
+    chat = query.message.chat if query.message else None
+    if chat and chat.type != "private":
+        try: await query.answer("This bot only works in private chat.", show_alert=True)
+        except Exception: pass
         return
     await query.answer()
     user = update.effective_user
@@ -1472,6 +1636,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     track(user, "upload document")
 
+    # Broadcast: forward this document to every known user.
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+        return
+
     doc = msg.document
     if not doc:
         return
@@ -1627,6 +1796,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user or not is_generator(user.id):
+        return
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
         return
     waiting = WAITING_FOR.get(user.id, "")
     tgt = panel_target_uid(user.id)
@@ -2413,12 +2585,26 @@ async def _refresh_quiz_status(context: ContextTypes.DEFAULT_TYPE, uid: int, cha
     QUIZ_STATUS_MSG[uid] = (sent.chat_id, sent.message_id)
 
 
+async def handle_broadcast_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all media handler — only acts when an admin is in broadcast mode."""
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    track(user, "media")
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+
+
 async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user or not msg.poll:
         return
     if not is_generator(user.id):
+        return
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
         return
     if not await enforce_subscription(update, context):
         return
@@ -2680,11 +2866,19 @@ def main() -> None:
         .concurrent_updates(True)
         .build()
     )
-    app.add_handler(MessageHandler(filters.TEXT, handle_text))
+    private = filters.ChatType.PRIVATE
+    app.add_handler(MessageHandler(private & filters.TEXT, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
+    app.add_handler(MessageHandler(private & filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(private & filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(private & filters.POLL, handle_poll_message))
+    # Catch-all for other media types (video, voice, sticker, animation, audio,
+    # video_note) — used by /broadcast to forward any message kind.
+    other_media = (
+        filters.VIDEO | filters.VOICE | filters.Sticker.ALL
+        | filters.ANIMATION | filters.AUDIO | filters.VIDEO_NOTE
+    )
+    app.add_handler(MessageHandler(private & other_media, handle_broadcast_media))
     app.add_error_handler(on_error)
 
     # Quiet noisy library loggers — PTB auto-recovers from these and we already
