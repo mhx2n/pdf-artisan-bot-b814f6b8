@@ -369,6 +369,7 @@ def _save_state() -> None:
             "user_quiz": {str(k): v for k, v in USER_QUIZ.items() if v},
             "force_channels": FORCE_CHANNELS,
             "force_caption": FORCE_CAPTION,
+            "known_users": list(KNOWN_USERS),
         }
         STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
