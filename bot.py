@@ -870,6 +870,11 @@ def help_text(user_id: int) -> str:
         <code>/removechannel &lt;index&gt;</code>
         <code>/setjoinmsg &lt;text&gt;</code> — Customise the gate caption (use <code>{user_id}</code> placeholder)
 
+        <b>Broadcasting</b>
+        <code>/broadcast</code> — Then send any message (text/photo/video/doc/sticker/poll) to forward it to every known user
+        <code>/broadcast &lt;text&gt;</code> — Inline text broadcast
+        <code>/cancelbroadcast</code> — Abort a pending broadcast
+
         <b>PDF rename</b> — Reply to any generated PDF with the desired file name.
 
         <i>All commands also accept the </i><code>.</code><i> prefix.</i>
