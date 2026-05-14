@@ -1118,8 +1118,9 @@ async def dispatch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await handle_role_command(real, args, update, context)
         return True
 
-    # Admin-only commands (front / back page management)
-    admin_cmds = {"frontpage", "backpage", "removefront", "removeback"}
+    # Admin-only commands (front / back page management + broadcast)
+    admin_cmds = {"frontpage", "backpage", "removefront", "removeback",
+                  "broadcast", "cancelbroadcast"}
     if cmd in admin_cmds:
         if not is_admin(user.id):
             await msg.reply_text("This command is restricted to administrators.")
