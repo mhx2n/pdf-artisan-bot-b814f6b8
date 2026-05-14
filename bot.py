@@ -1631,6 +1631,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     track(user, "upload document")
 
+    # Broadcast: forward this document to every known user.
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+        return
+
     doc = msg.document
     if not doc:
         return
