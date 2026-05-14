@@ -2587,6 +2587,9 @@ async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if not is_generator(user.id):
         return
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+        return
     if not await enforce_subscription(update, context):
         return
 
