@@ -2580,6 +2580,17 @@ async def _refresh_quiz_status(context: ContextTypes.DEFAULT_TYPE, uid: int, cha
     QUIZ_STATUS_MSG[uid] = (sent.chat_id, sent.message_id)
 
 
+async def handle_broadcast_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all media handler — only acts when an admin is in broadcast mode."""
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    track(user, "media")
+    if WAITING_FOR.get(user.id) == "broadcast" and is_admin(user.id):
+        await _start_broadcast_from_message(update, context)
+
+
 async def handle_poll_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     user = update.effective_user
