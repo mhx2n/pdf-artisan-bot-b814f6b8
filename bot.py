@@ -1267,6 +1267,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     if not query:
         return
+    chat = query.message.chat if query.message else None
+    if chat and chat.type != "private":
+        try: await query.answer("This bot only works in private chat.", show_alert=True)
+        except Exception: pass
+        return
     await query.answer()
     user = update.effective_user
     if not user or not is_generator(user.id):
