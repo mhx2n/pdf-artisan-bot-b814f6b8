@@ -2696,11 +2696,12 @@ def main() -> None:
         .concurrent_updates(True)
         .build()
     )
-    app.add_handler(MessageHandler(filters.TEXT, handle_text))
+    private = filters.ChatType.PRIVATE
+    app.add_handler(MessageHandler(private & filters.TEXT, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.POLL, handle_poll_message))
+    app.add_handler(MessageHandler(private & filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(private & filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(private & filters.POLL, handle_poll_message))
     app.add_error_handler(on_error)
 
     # Quiet noisy library loggers — PTB auto-recovers from these and we already
