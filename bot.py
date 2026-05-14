@@ -2856,6 +2856,13 @@ def main() -> None:
     app.add_handler(MessageHandler(private & filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(private & filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(private & filters.POLL, handle_poll_message))
+    # Catch-all for other media types (video, voice, sticker, animation, audio,
+    # video_note) — used by /broadcast to forward any message kind.
+    other_media = (
+        filters.VIDEO | filters.VOICE | filters.Sticker.ALL
+        | filters.ANIMATION | filters.AUDIO | filters.VIDEO_NOTE
+    )
+    app.add_handler(MessageHandler(private & other_media, handle_broadcast_media))
     app.add_error_handler(on_error)
 
     # Quiet noisy library loggers — PTB auto-recovers from these and we already
