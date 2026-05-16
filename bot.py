@@ -2402,11 +2402,32 @@ _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 def _render_gate_caption(text: str, user) -> str:
     """Apply placeholders and convert [label](url) → <a href="url">label</a>."""
     uid = str(getattr(user, "id", "") or "")
-    uname = html.escape(getattr(user, "full_name", "") or getattr(user, "first_name", "") or "")
+    first = html.escape(getattr(user, "first_name", "") or "")
+    last = html.escape(getattr(user, "last_name", "") or "")
+    full = html.escape(getattr(user, "full_name", "") or "") or first
     uhandle = getattr(user, "username", "") or ""
-    out = text.replace("{user_id}", uid)
-    out = out.replace("{user_name}", uname)
-    out = out.replace("{username}", f"@{uhandle}" if uhandle else uname)
+
+    replacements = {
+        "{user_id}": uid,
+        "{user_name}": full,
+        "{fullname}": full,
+        "{firstname}": first,
+        "{first_name}": first,
+        "{lastname}": last,
+        "{last_name}": last,
+        "{username}": f"@{uhandle}" if uhandle else full,
+        "%user_id%": uid,
+        "%user_name%": full,
+        "%fullname%": full,
+        "%firstname%": first,
+        "%first_name%": first,
+        "%lastname%": last,
+        "%last_name%": last,
+        "%username%": f"@{uhandle}" if uhandle else full,
+    }
+    out = text
+    for k, v in replacements.items():
+        out = out.replace(k, v)
     out = _MD_LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', out)
     return out
 
