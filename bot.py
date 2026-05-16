@@ -2452,11 +2452,13 @@ def _channels_overview() -> str:
                 "Use <code>/addchannel</code> to add one.")
     lines = ["<b>Required Channels</b>"]
     for i, c in enumerate(FORCE_CHANNELS, 1):
+        row_v = c.get("row") or 0
+        row_txt = f" · Row: <code>{row_v}</code>" if row_v else " · Row: <code>auto</code>"
         lines.append(
             f"  <b>{i}.</b> <code>{html.escape(c.get('title', '—'))}</code>\n"
-            f"     · Chat: <code>{html.escape(c.get('chat', ''))}</code>\n"
+            f"     · Chat: <code>{html.escape(str(c.get('chat', '')))}</code>\n"
             f"     · Link: {html.escape(c.get('link', '—'))}\n"
-            f"     · Button: <code>{html.escape(c.get('button', '—'))}</code>"
+            f"     · Button: <code>{html.escape(c.get('button', '—'))}</code>{row_txt}"
         )
     lines.append("")
     lines.append("<b>Gate caption</b>")
