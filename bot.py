@@ -1438,7 +1438,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         try:
             await query.answer("You have not joined all required channels yet.", show_alert=True)
-            await query.edit_message_reply_markup(reply_markup=_join_keyboard(pending))
+            await query.edit_message_reply_markup(reply_markup=_join_keyboard())
         except BadRequest: pass
         return
 
@@ -2369,15 +2369,46 @@ async def missing_subscriptions(context: ContextTypes.DEFAULT_TYPE, uid: int) ->
     return pending
 
 
-def _join_keyboard(pending: List[Dict[str, str]]) -> InlineKeyboardMarkup:
-    rows: List[List[InlineKeyboardButton]] = []
-    for entry in pending:
+def _join_keyboard(_pending_unused: List[Dict[str, str]] | None = None) -> InlineKeyboardMarkup:
+    """Always render all configured channels so every required link is visible.
+    Buttons can sit side-by-side using each entry's optional 'row' field
+    (entries sharing the same row number are placed in the same row)."""
+    grouped: Dict[int, List[InlineKeyboardButton]] = {}
+    order: List[int] = []
+    fallback_row = 0
+    for entry in FORCE_CHANNELS:
         link = entry.get("link") or ""
         label = entry.get("button") or f"Join {entry.get('title', 'Channel')}"
-        if link:
-            rows.append([InlineKeyboardButton(label, url=link)])
+        if not link:
+            continue
+        try:
+            row_idx = int(entry.get("row") or 0)
+        except Exception:
+            row_idx = 0
+        if row_idx <= 0:
+            fallback_row += 1
+            row_idx = 1000 + fallback_row  # unique row → stacked vertically
+        if row_idx not in grouped:
+            grouped[row_idx] = []
+            order.append(row_idx)
+        grouped[row_idx].append(InlineKeyboardButton(label, url=link))
+    rows: List[List[InlineKeyboardButton]] = [grouped[r] for r in order]
     rows.append([InlineKeyboardButton("✓ I have joined", callback_data="fsub:check")])
     return InlineKeyboardMarkup(rows)
+
+
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+def _render_gate_caption(text: str, user) -> str:
+    """Apply placeholders and convert [label](url) → <a href="url">label</a>."""
+    uid = str(getattr(user, "id", "") or "")
+    uname = html.escape(getattr(user, "full_name", "") or getattr(user, "first_name", "") or "")
+    uhandle = getattr(user, "username", "") or ""
+    out = text.replace("{user_id}", uid)
+    out = out.replace("{user_name}", uname)
+    out = out.replace("{username}", f"@{uhandle}" if uhandle else uname)
+    out = _MD_LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', out)
+    return out
 
 
 async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -2389,8 +2420,8 @@ async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
     pending = await missing_subscriptions(context, user.id)
     if not pending:
         return True
-    text = FORCE_CAPTION.replace("{user_id}", str(user.id))
-    markup = _join_keyboard(pending)
+    text = _render_gate_caption(FORCE_CAPTION, user)
+    markup = _join_keyboard()
     try:
         if update.callback_query:
             await update.callback_query.answer("Membership required.", show_alert=False)
@@ -2421,11 +2452,13 @@ def _channels_overview() -> str:
                 "Use <code>/addchannel</code> to add one.")
     lines = ["<b>Required Channels</b>"]
     for i, c in enumerate(FORCE_CHANNELS, 1):
+        row_v = c.get("row") or 0
+        row_txt = f" · Row: <code>{row_v}</code>" if row_v else " · Row: <code>auto</code>"
         lines.append(
             f"  <b>{i}.</b> <code>{html.escape(c.get('title', '—'))}</code>\n"
-            f"     · Chat: <code>{html.escape(c.get('chat', ''))}</code>\n"
+            f"     · Chat: <code>{html.escape(str(c.get('chat', '')))}</code>\n"
             f"     · Link: {html.escape(c.get('link', '—'))}\n"
-            f"     · Button: <code>{html.escape(c.get('button', '—'))}</code>"
+            f"     · Button: <code>{html.escape(c.get('button', '—'))}</code>{row_txt}"
         )
     lines.append("")
     lines.append("<b>Gate caption</b>")
@@ -2454,7 +2487,9 @@ async def cmd_addchannel(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     parts = [p.strip() for p in args.split("|")]
     if len(parts) < 3 or not parts[0]:
         await msg.reply_text(
-            "Usage:\n<code>/addchannel @channel | Title | https://t.me/... | Button label</code>",
+            "Usage:\n<code>/addchannel @channel | Title | https://t.me/... | Button label | row</code>\n\n"
+            "<i>row</i> is optional. Entries sharing the same row number are placed "
+            "side-by-side on the gate. Leave blank for one-per-row (stacked).",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2462,7 +2497,12 @@ async def cmd_addchannel(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     title = parts[1] or "Channel"
     link = parts[2] or ""
     button = parts[3] if len(parts) >= 4 and parts[3] else f"Join {title}"
-    FORCE_CHANNELS.append({"chat": chat_ref, "title": title, "link": link, "button": button})
+    row_val = 0
+    if len(parts) >= 5 and parts[4]:
+        try: row_val = int(re.sub(r"\D", "", parts[4]) or "0")
+        except Exception: row_val = 0
+    FORCE_CHANNELS.append({"chat": chat_ref, "title": title, "link": link,
+                           "button": button, "row": row_val})
     _save_state()
     await msg.reply_text(
         f"✓ Added channel <code>{html.escape(chat_ref)}</code>.\n\n" + _channels_overview(),
@@ -2498,10 +2538,16 @@ async def cmd_setjoinmsg(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     text = args.strip()
     if not text:
         await msg.reply_text(
-            "Provide caption text after the command. HTML is allowed.\n"
-            "Use the placeholder <code>{user_id}</code> to insert the user's "
-            "Telegram ID into the message.",
-            parse_mode=ParseMode.HTML,
+            "Provide caption text after the command. HTML is allowed.\n\n"
+            "<b>Placeholders</b>\n"
+            "• <code>{user_id}</code> — Telegram numeric ID\n"
+            "• <code>{user_name}</code> — full display name\n"
+            "• <code>{username}</code> — @handle (or name fallback)\n\n"
+            "<b>Inline links</b>\n"
+            "Use markdown-style links anywhere — even inside <code>&lt;b&gt;</code>:\n"
+            "<code>[click here](https://example.com)</code> → renders as a tappable link.\n"
+            "<code>&lt;b&gt;[Join now](https://t.me/your_channel)&lt;/b&gt;</code> works too.",
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True,
         )
         return
     FORCE_CAPTION = text
