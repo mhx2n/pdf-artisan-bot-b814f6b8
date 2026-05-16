@@ -2485,7 +2485,9 @@ async def cmd_addchannel(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     parts = [p.strip() for p in args.split("|")]
     if len(parts) < 3 or not parts[0]:
         await msg.reply_text(
-            "Usage:\n<code>/addchannel @channel | Title | https://t.me/... | Button label</code>",
+            "Usage:\n<code>/addchannel @channel | Title | https://t.me/... | Button label | row</code>\n\n"
+            "<i>row</i> is optional. Entries sharing the same row number are placed "
+            "side-by-side on the gate. Leave blank for one-per-row (stacked).",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -2493,7 +2495,12 @@ async def cmd_addchannel(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     title = parts[1] or "Channel"
     link = parts[2] or ""
     button = parts[3] if len(parts) >= 4 and parts[3] else f"Join {title}"
-    FORCE_CHANNELS.append({"chat": chat_ref, "title": title, "link": link, "button": button})
+    row_val = 0
+    if len(parts) >= 5 and parts[4]:
+        try: row_val = int(re.sub(r"\D", "", parts[4]) or "0")
+        except Exception: row_val = 0
+    FORCE_CHANNELS.append({"chat": chat_ref, "title": title, "link": link,
+                           "button": button, "row": row_val})
     _save_state()
     await msg.reply_text(
         f"✓ Added channel <code>{html.escape(chat_ref)}</code>.\n\n" + _channels_overview(),
