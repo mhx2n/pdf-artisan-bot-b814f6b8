@@ -2420,8 +2420,8 @@ async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYP
     pending = await missing_subscriptions(context, user.id)
     if not pending:
         return True
-    text = FORCE_CAPTION.replace("{user_id}", str(user.id))
-    markup = _join_keyboard(pending)
+    text = _render_gate_caption(FORCE_CAPTION, user)
+    markup = _join_keyboard()
     try:
         if update.callback_query:
             await update.callback_query.answer("Membership required.", show_alert=False)
