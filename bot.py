@@ -1438,7 +1438,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         try:
             await query.answer("You have not joined all required channels yet.", show_alert=True)
-            await query.edit_message_reply_markup(reply_markup=_join_keyboard(pending))
+            await query.edit_message_reply_markup(reply_markup=_join_keyboard())
         except BadRequest: pass
         return
 
