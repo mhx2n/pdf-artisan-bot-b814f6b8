@@ -2369,15 +2369,46 @@ async def missing_subscriptions(context: ContextTypes.DEFAULT_TYPE, uid: int) ->
     return pending
 
 
-def _join_keyboard(pending: List[Dict[str, str]]) -> InlineKeyboardMarkup:
-    rows: List[List[InlineKeyboardButton]] = []
-    for entry in pending:
+def _join_keyboard(_pending_unused: List[Dict[str, str]] | None = None) -> InlineKeyboardMarkup:
+    """Always render all configured channels so every required link is visible.
+    Buttons can sit side-by-side using each entry's optional 'row' field
+    (entries sharing the same row number are placed in the same row)."""
+    grouped: Dict[int, List[InlineKeyboardButton]] = {}
+    order: List[int] = []
+    fallback_row = 0
+    for entry in FORCE_CHANNELS:
         link = entry.get("link") or ""
         label = entry.get("button") or f"Join {entry.get('title', 'Channel')}"
-        if link:
-            rows.append([InlineKeyboardButton(label, url=link)])
+        if not link:
+            continue
+        try:
+            row_idx = int(entry.get("row") or 0)
+        except Exception:
+            row_idx = 0
+        if row_idx <= 0:
+            fallback_row += 1
+            row_idx = 1000 + fallback_row  # unique row → stacked vertically
+        if row_idx not in grouped:
+            grouped[row_idx] = []
+            order.append(row_idx)
+        grouped[row_idx].append(InlineKeyboardButton(label, url=link))
+    rows: List[List[InlineKeyboardButton]] = [grouped[r] for r in order]
     rows.append([InlineKeyboardButton("✓ I have joined", callback_data="fsub:check")])
     return InlineKeyboardMarkup(rows)
+
+
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+def _render_gate_caption(text: str, user) -> str:
+    """Apply placeholders and convert [label](url) → <a href="url">label</a>."""
+    uid = str(getattr(user, "id", "") or "")
+    uname = html.escape(getattr(user, "full_name", "") or getattr(user, "first_name", "") or "")
+    uhandle = getattr(user, "username", "") or ""
+    out = text.replace("{user_id}", uid)
+    out = out.replace("{user_name}", uname)
+    out = out.replace("{username}", f"@{uhandle}" if uhandle else uname)
+    out = _MD_LINK_RE.sub(lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', out)
+    return out
 
 
 async def enforce_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
