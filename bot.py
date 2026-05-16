@@ -2538,10 +2538,16 @@ async def cmd_setjoinmsg(update: Update, context: ContextTypes.DEFAULT_TYPE, arg
     text = args.strip()
     if not text:
         await msg.reply_text(
-            "Provide caption text after the command. HTML is allowed.\n"
-            "Use the placeholder <code>{user_id}</code> to insert the user's "
-            "Telegram ID into the message.",
-            parse_mode=ParseMode.HTML,
+            "Provide caption text after the command. HTML is allowed.\n\n"
+            "<b>Placeholders</b>\n"
+            "• <code>{user_id}</code> — Telegram numeric ID\n"
+            "• <code>{user_name}</code> — full display name\n"
+            "• <code>{username}</code> — @handle (or name fallback)\n\n"
+            "<b>Inline links</b>\n"
+            "Use markdown-style links anywhere — even inside <code>&lt;b&gt;</code>:\n"
+            "<code>[click here](https://example.com)</code> → renders as a tappable link.\n"
+            "<code>&lt;b&gt;[Join now](https://t.me/your_channel)&lt;/b&gt;</code> works too.",
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True,
         )
         return
     FORCE_CAPTION = text
