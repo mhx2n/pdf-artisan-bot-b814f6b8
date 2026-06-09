@@ -1715,9 +1715,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             tg_file = await context.bot.get_file(doc.file_id)
             raw = bytes(await tg_file.download_as_bytearray())
-            await _set_progress("⟳ Generating PDF… applying front/back covers.")
+            await _set_progress("⟳ Generating PDF… applying watermark.")
             asset_uid = effective_asset_uid(user.id)
-            merged = await asyncio.to_thread(_merge_with_front_back, asset_uid, raw)
+            user_settings = effective_settings(user.id)
+            stamped = await asyncio.to_thread(
+                _apply_watermark_to_pdf, asset_uid, user_settings, raw
+            )
+            await _set_progress("⟳ Generating PDF… applying front/back covers.")
+            merged = await asyncio.to_thread(_merge_with_front_back, asset_uid, stamped)
             await _set_progress("⟳ Generating PDF… uploading result.")
             out_name = re.sub(r"\.pdf$", "", doc.file_name or "document", flags=re.IGNORECASE) + "_wrapped.pdf"
             bio = io.BytesIO(merged)
@@ -1738,7 +1743,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         document=InputFile(bio, filename=out_name),
                         filename=out_name,
                         thumbnail=thumb,
-                        caption="✓ Front/back covers applied to your PDF.",
+                        caption="✓ Watermark + front/back covers applied to your PDF.",
                         read_timeout=300, write_timeout=300, connect_timeout=60, pool_timeout=60,
                     )
                     last_err = None
