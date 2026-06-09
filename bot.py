@@ -2879,9 +2879,10 @@ def _watermark_overlay_for_size(uid: int, settings: Dict[str, Any], width_pt: fl
 def _apply_watermark_to_pdf(uid: int, settings: Dict[str, Any], body_pdf: bytes) -> bytes:
     """Overlay the configured watermark on every page of body_pdf.
 
-    Safe no-op when watermark is disabled or rendering fails. The watermark is
-    placed BEHIND the original page content (over=False) so underlying
-    text/images stay fully readable; falls back to over=True on older pypdf.
+    Safe no-op when watermark is disabled or rendering fails. For uploaded PDFs
+    the watermark must be placed ABOVE the source page, because most PDFs have
+    an opaque white page background that hides a background watermark entirely.
+    Opacity keeps the original text/images readable.
     """
     try:
         from pypdf import PdfReader, PdfWriter
@@ -2910,10 +2911,7 @@ def _apply_watermark_to_pdf(uid: int, settings: Dict[str, Any], body_pdf: bytes)
             wm_reader = overlay_cache[key]
             if wm_reader is not None and len(wm_reader.pages) > 0:
                 wm_page = wm_reader.pages[0]
-                try:
-                    page.merge_page(wm_page, over=False)
-                except TypeError:
-                    page.merge_page(wm_page)
+                page.merge_page(wm_page)
                 any_applied = True
         except Exception:
             logger.exception("failed to watermark a page; keeping original")
