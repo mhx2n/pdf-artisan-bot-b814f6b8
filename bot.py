@@ -2837,8 +2837,11 @@ def _watermark_overlay_for_size(uid: int, settings: Dict[str, Any], width_pt: fl
         return None
     use_image = bool(settings.get("watermark_image_enabled")) and wm_path(uid).exists()
     opacity = max(0, min(100, int(settings.get("watermark_opacity", 15)))) / 100.0
-    if opacity > 0 and opacity < 0.08:
-        opacity = 0.08
+    # Uploaded PDFs often contain a fully opaque white page background. Since
+    # the watermark must be visible when composited above such pages, keep a
+    # practical minimum opacity while still allowing the user to turn it off.
+    if opacity > 0 and opacity < 0.16:
+        opacity = 0.16
     if opacity <= 0:
         return None
     theme = THEMES.get(settings.get("theme"), THEMES["emerald"])
@@ -2860,10 +2863,10 @@ def _watermark_overlay_for_size(uid: int, settings: Dict[str, Any], width_pt: fl
     html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><style>
         @page {{ size: {width_pt:.2f}pt {height_pt:.2f}pt; margin: 0; }}
         html, body {{ margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }}
-        .wm {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; }}
-        .wm img {{ width: 60%; max-width: 70%; max-height: 60%; height: auto; object-fit: contain; }}
+        .wm {{ position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }}
+        .wm img {{ width: 68%; max-width: 78%; max-height: 68%; height: auto; object-fit: contain; }}
         .wm-text {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center;
-            text-align: center; font-size: 72pt; font-weight: 900; letter-spacing: 6px;
+            text-align: center; font-size: 82pt; font-weight: 900; letter-spacing: 6px;
             font-family: 'Inter', 'Helvetica', sans-serif; }}
     </style></head><body>{inner}</body></html>"""
     try:
@@ -2876,9 +2879,10 @@ def _watermark_overlay_for_size(uid: int, settings: Dict[str, Any], width_pt: fl
 def _apply_watermark_to_pdf(uid: int, settings: Dict[str, Any], body_pdf: bytes) -> bytes:
     """Overlay the configured watermark on every page of body_pdf.
 
-    Safe no-op when watermark is disabled or rendering fails. The watermark is
-    placed BEHIND the original page content (over=False) so underlying
-    text/images stay fully readable; falls back to over=True on older pypdf.
+    Safe no-op when watermark is disabled or rendering fails. For uploaded PDFs
+    the watermark must be placed ABOVE the source page, because most PDFs have
+    an opaque white page background that hides a background watermark entirely.
+    Opacity keeps the original text/images readable.
     """
     try:
         from pypdf import PdfReader, PdfWriter
@@ -2907,10 +2911,7 @@ def _apply_watermark_to_pdf(uid: int, settings: Dict[str, Any], body_pdf: bytes)
             wm_reader = overlay_cache[key]
             if wm_reader is not None and len(wm_reader.pages) > 0:
                 wm_page = wm_reader.pages[0]
-                try:
-                    page.merge_page(wm_page, over=False)
-                except TypeError:
-                    page.merge_page(wm_page)
+                page.merge_page(wm_page)
                 any_applied = True
         except Exception:
             logger.exception("failed to watermark a page; keeping original")
