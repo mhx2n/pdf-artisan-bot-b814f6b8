@@ -2821,6 +2821,102 @@ async def _save_front_back(context, doc, target: Path, kind: str) -> str:
     raise ValueError("Only PDF or image files are accepted for front/back pages.")
 
 
+def _watermark_overlay_for_size(uid: int, settings: Dict[str, Any], width_pt: float, height_pt: float) -> Optional[bytes]:
+    """Render a single-page transparent PDF watermark sized to (width_pt, height_pt).
+
+    Returns None when watermark is disabled or has no content. Uses the same
+    visual style as the CSV→PDF watermark (centered, low opacity, image or text)
+    so wrapped PDFs look consistent with generated ones.
+    """
+    if not settings.get("watermark_enabled"):
+        return None
+    use_image = bool(settings.get("watermark_image_enabled")) and wm_path(uid).exists()
+    opacity = max(0, min(100, int(settings.get("watermark_opacity", 15)))) / 100.0
+    if opacity > 0 and opacity < 0.08:
+        opacity = 0.08
+    if opacity <= 0:
+        return None
+    theme = THEMES.get(settings.get("theme"), THEMES["emerald"])
+    if use_image:
+        img_uri = f"file://{wm_path(uid).resolve()}"
+        inner = (
+            f"<div class='wm'>"
+            f"<img src='{img_uri}' alt='' style='opacity:{opacity};'/>"
+            f"</div>"
+        )
+    else:
+        text = html.escape(settings.get("watermark_text", "") or "").strip()
+        if not text:
+            return None
+        inner = (
+            f"<div class='wm-text' style='opacity:{opacity}; color:{theme['primary']};'>"
+            f"{text}</div>"
+        )
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><style>
+        @page {{ size: {width_pt:.2f}pt {height_pt:.2f}pt; margin: 0; }}
+        html, body {{ margin: 0; padding: 0; width: 100%; height: 100%; background: transparent; }}
+        .wm {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; }}
+        .wm img {{ width: 60%; max-width: 70%; max-height: 60%; height: auto; object-fit: contain; }}
+        .wm-text {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center;
+            text-align: center; font-size: 72pt; font-weight: 900; letter-spacing: 6px;
+            font-family: 'Inter', 'Helvetica', sans-serif; }}
+    </style></head><body>{inner}</body></html>"""
+    try:
+        return HTML(string=html_doc).write_pdf()
+    except Exception:
+        logger.exception("watermark overlay render failed")
+        return None
+
+
+def _apply_watermark_to_pdf(uid: int, settings: Dict[str, Any], body_pdf: bytes) -> bytes:
+    """Overlay the configured watermark on every page of body_pdf.
+
+    Safe no-op when watermark is disabled or rendering fails. The watermark is
+    placed BEHIND the original page content (over=False) so underlying
+    text/images stay fully readable; falls back to over=True on older pypdf.
+    """
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        logger.exception("pypdf not available; skipping watermark overlay")
+        return body_pdf
+    if not settings.get("watermark_enabled"):
+        return body_pdf
+    try:
+        reader = PdfReader(io.BytesIO(body_pdf))
+    except Exception:
+        logger.exception("could not read uploaded PDF for watermarking")
+        return body_pdf
+    writer = PdfWriter()
+    overlay_cache: Dict[Tuple[int, int], Any] = {}
+    any_applied = False
+    for page in reader.pages:
+        try:
+            mb = page.mediabox
+            w = float(mb.width)
+            h = float(mb.height)
+            key = (int(round(w)), int(round(h)))
+            if key not in overlay_cache:
+                wm_bytes = _watermark_overlay_for_size(uid, settings, w, h)
+                overlay_cache[key] = PdfReader(io.BytesIO(wm_bytes)) if wm_bytes else None
+            wm_reader = overlay_cache[key]
+            if wm_reader is not None and len(wm_reader.pages) > 0:
+                wm_page = wm_reader.pages[0]
+                try:
+                    page.merge_page(wm_page, over=False)
+                except TypeError:
+                    page.merge_page(wm_page)
+                any_applied = True
+        except Exception:
+            logger.exception("failed to watermark a page; keeping original")
+        writer.add_page(page)
+    if not any_applied:
+        return body_pdf
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 def _merge_with_front_back(uid: int, body_pdf: bytes) -> bytes:
     """Prepend front_path and append back_path if present."""
     fp = front_path(uid)
